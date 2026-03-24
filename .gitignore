@@ -1,0 +1,60 @@
+# IDE and Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.iml
+.DS_Store
+Thumbs.db
+
+# Frontend (Vue.js + Vite + pnpm)
+frontend/node_modules/
+frontend/dist/
+frontend/.pnpm-store/
+frontend/.npm/
+frontend/.env.local
+frontend/.env.*.local
+
+# Backend (Java/Spring Boot + Maven)
+backend/target/
+backend/out/
+backend/*.jar
+backend/*.war
+backend/.classpath
+backend/.project
+backend/.settings/
+backend/bin/
+backend/.env.local
+backend/.env.*.local
+
+# Build artifacts
+dist/
+build/
+*.class
+*.jar
+*.war
+
+# Logs
+*.log
+logs/
+
+# Data and storage (if not needed in repo)
+backend/data/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# Dependencies cache
+.npm/
+.pnpm-store/
+
+# Backup files
+*.bak
+*.backup
+*~
