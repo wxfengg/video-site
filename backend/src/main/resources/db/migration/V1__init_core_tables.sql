@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS video (
 CREATE TABLE IF NOT EXISTS video_file (
     id BIGINT NOT NULL COMMENT '视频文件记录ID',
     video_id BIGINT NOT NULL COMMENT '视频ID',
-    storage_provider VARCHAR(32) NOT NULL COMMENT '存储提供者:local/oss',
+    storage_provider VARCHAR(32) NOT NULL COMMENT '存储提供者:local',
     object_key VARCHAR(512) NOT NULL COMMENT '对象存储key或路径',
     file_size BIGINT NULL COMMENT '文件大小',
     mime_type VARCHAR(128) NULL COMMENT 'MIME类型',

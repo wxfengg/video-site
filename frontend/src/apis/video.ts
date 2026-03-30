@@ -67,6 +67,11 @@ export interface UploadCompleteResponse {
   status: string
 }
 
+export interface UploadCoverResponse {
+  objectKey: string
+  coverUrl: string
+}
+
 export interface VideoUpdateRequest {
   title?: string
   description?: string
@@ -250,6 +255,23 @@ export async function uploadComplete(payload: UploadCompleteRequest) {
 
   if (response.code !== 0 || !response.data) {
     throw new Error(response.message || "上传入库失败")
+  }
+
+  return response.data
+}
+
+export async function uploadCoverImage(videoId: number | string, file: File) {
+  const formData = new FormData()
+  formData.append("file", file)
+
+  const response = await httpRequest<UploadCoverResponse>(`/api/videos/upload/cover/${videoId}`, {
+    method: "POST",
+    body: formData,
+    skipJsonContentType: true,
+  })
+
+  if (response.code !== 0 || !response.data) {
+    throw new Error(response.message || "封面上传失败")
   }
 
   return response.data

@@ -17,7 +17,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
     @Value("${app.cors.allowed-origin:http://localhost:5173}")
     private String corsAllowedOrigin;
 
-    @Value("${app.storage.local-root:./data/storage}")
+    @Value("${app.storage.local-root:../}")
     private String localStorageRoot;
 
     public WebMvcConfig(AdminAuthInterceptor adminAuthInterceptor) {

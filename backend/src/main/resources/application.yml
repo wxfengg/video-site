@@ -35,15 +35,7 @@ app:
   cors:
     allowed-origin: ${CORS_ALLOWED_ORIGIN:http://localhost:5173}
   storage:
-    provider: ${STORAGE_PROVIDER:local}
-    local-root: ${LOCAL_STORAGE_ROOT:./data/storage}
-    oss:
-      endpoint: ${OSS_ENDPOINT:}
-      region: ${OSS_REGION:}
-      bucket: ${OSS_BUCKET:}
-      access-key-id: ${OSS_ACCESS_KEY_ID:}
-      access-key-secret: ${OSS_ACCESS_KEY_SECRET:}
-      public-base-url: ${OSS_PUBLIC_BASE_URL:}
+    local-root: ${LOCAL_STORAGE_ROOT:../}
   transcode:
     ffmpeg-bin: ${FFMPEG_BIN:ffmpeg}
     worker-cron: ${TRANSCODE_WORKER_CRON:0/10 * * * * ?}

@@ -17,7 +17,7 @@ public class LocalStorageProvider implements StorageProvider {
 
     private final Path rootPath;
 
-    public LocalStorageProvider(@Value("${app.storage.local-root:./data/storage}") String localRoot) {
+    public LocalStorageProvider(@Value("${app.storage.local-root:../}") String localRoot) {
         this.rootPath = Paths.get(localRoot).toAbsolutePath().normalize();
         try {
             Files.createDirectories(this.rootPath);

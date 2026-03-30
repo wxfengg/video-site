@@ -75,6 +75,17 @@
       </el-form-item>
       <el-form-item label="封面">
         <el-input v-model="editForm.coverUrl" maxlength="512" name="editCoverUrl" aria-label="编辑封面链接" />
+        <div class="cover-edit-actions">
+          <input
+            ref="editCoverInput"
+            type="file"
+            accept="image/*"
+            aria-label="上传新封面"
+            @change="onEditCoverFileChange"
+          />
+          <el-button size="small" :loading="coverUploading" @click="uploadEditCover">上传并替换封面</el-button>
+        </div>
+        <img v-if="editForm.coverUrl" :src="editForm.coverUrl" alt="当前封面" class="cover-preview" />
       </el-form-item>
     </el-form>
     <template #footer>
@@ -88,7 +99,15 @@
 import { onMounted, reactive, ref } from "vue"
 import { useRouter } from "vue-router"
 import { ElMessage } from "element-plus"
-import { getAdminVideos, publishVideo, unpublishVideo, updateVideo, type VideoListItem } from "../../apis/video"
+import {
+  getAdminVideo,
+  getAdminVideos,
+  publishVideo,
+  unpublishVideo,
+  updateVideo,
+  uploadCoverImage,
+  type VideoListItem,
+} from "../../apis/video"
 
 const router = useRouter()
 const loading = ref(false)
@@ -101,11 +120,17 @@ const keyword = ref("")
 
 const editVisible = ref(false)
 const editId = ref<string | number | null>(null)
+const editCoverInput = ref<HTMLInputElement | null>(null)
+const editCoverFile = ref<File | null>(null)
+const coverUploading = ref(false)
 const editForm = reactive({
   title: "",
   description: "",
   coverUrl: "",
 })
+
+const MAX_COVER_SIZE_BYTES = 5 * 1024 * 1024
+const ALLOWED_COVER_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"])
 
 onMounted(async () => {
   await reload()
@@ -129,12 +154,93 @@ async function onPageChange(next: number) {
   await reload()
 }
 
-function openEdit(row: VideoListItem) {
+async function openEdit(row: VideoListItem) {
   editId.value = row.id
   editForm.title = row.title || ""
   editForm.description = ""
   editForm.coverUrl = row.coverUrl || ""
+  editCoverFile.value = null
+  if (editCoverInput.value) {
+    editCoverInput.value.value = ""
+  }
+
+  try {
+    const detail = await getAdminVideo(row.id)
+    editForm.description = detail.description || ""
+    editForm.coverUrl = detail.coverUrl || editForm.coverUrl
+  } catch (_err) {
+    ElMessage.warning("加载视频详情失败，已使用列表数据")
+  }
+
   editVisible.value = true
+}
+
+function onEditCoverFileChange(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0] || null
+  if (file && !validateCoverFile(file)) {
+    target.value = ""
+    editCoverFile.value = null
+    return
+  }
+  editCoverFile.value = file
+}
+
+function validateCoverFile(file: File): boolean {
+  if (file.size > MAX_COVER_SIZE_BYTES) {
+    ElMessage.warning("封面图片不能超过 5MB")
+    return false
+  }
+
+  const type = (file.type || "").toLowerCase()
+  if (type) {
+    if (!ALLOWED_COVER_MIME_TYPES.has(type)) {
+      ElMessage.warning("封面仅支持 jpg/jpeg、png、webp 格式")
+      return false
+    }
+    return true
+  }
+
+  const lowerName = file.name.toLowerCase()
+  if (
+    !(
+      lowerName.endsWith(".jpg") ||
+      lowerName.endsWith(".jpeg") ||
+      lowerName.endsWith(".png") ||
+      lowerName.endsWith(".webp")
+    )
+  ) {
+    ElMessage.warning("封面仅支持 jpg/jpeg、png、webp 格式")
+    return false
+  }
+
+  return true
+}
+
+async function uploadEditCover() {
+  if (!editId.value) {
+    return
+  }
+  if (!editCoverFile.value) {
+    ElMessage.warning("请先选择封面图片")
+    return
+  }
+
+  coverUploading.value = true
+  try {
+    const result = await uploadCoverImage(editId.value, editCoverFile.value)
+    editForm.coverUrl = result.coverUrl
+    ElMessage.success("封面上传成功")
+    editCoverFile.value = null
+    if (editCoverInput.value) {
+      editCoverInput.value.value = ""
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "封面上传失败"
+    ElMessage.error(message)
+  } finally {
+    coverUploading.value = false
+  }
 }
 
 async function submitEdit() {
@@ -194,5 +300,22 @@ async function openPlayer(row: VideoListItem) {
   margin-top: 16px;
   display: flex;
   justify-content: flex-end;
+}
+
+.cover-edit-actions {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cover-preview {
+  margin-top: 10px;
+  width: 220px;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
 }
 </style>

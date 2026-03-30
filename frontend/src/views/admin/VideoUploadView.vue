@@ -21,6 +21,12 @@
       <el-form-item label="文件" required>
         <input ref="fileInput" type="file" accept="video/*" aria-label="选择视频文件" @change="onFileChange" />
       </el-form-item>
+      <el-form-item label="封面图">
+        <input ref="coverInput" type="file" accept="image/*" aria-label="选择封面图" @change="onCoverFileChange" />
+        <div v-if="coverPreviewUrl" class="cover-preview-wrap">
+          <img :src="coverPreviewUrl" alt="封面预览" class="cover-preview" />
+        </div>
+      </el-form-item>
       <el-form-item>
         <el-button type="primary" :loading="submitting" @click="onSubmit">上传并入库</el-button>
         <el-button v-if="canRetry" @click="retryUpload">重试上次上传</el-button>
@@ -42,19 +48,23 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from "vue"
+import { onUnmounted, reactive, ref } from "vue"
 import { ElMessage } from "element-plus"
 import {
   getAdminVideo,
   uploadComplete,
+  uploadCoverImage,
   uploadInit,
   uploadLocalFileWithProgress,
   type UploadCompleteResponse,
 } from "../../apis/video"
 
 const fileInput = ref<HTMLInputElement | null>(null)
+const coverInput = ref<HTMLInputElement | null>(null)
 const submitting = ref(false)
 const selectedFile = ref<File | null>(null)
+const selectedCoverFile = ref<File | null>(null)
+const coverPreviewUrl = ref("")
 const lastResult = ref<UploadCompleteResponse | null>(null)
 const uploadProgress = ref(0)
 const transcodeStatusText = ref("")
@@ -66,9 +76,68 @@ const form = reactive({
   description: "",
 })
 
+const MAX_COVER_SIZE_BYTES = 5 * 1024 * 1024
+const ALLOWED_COVER_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"])
+
 function onFileChange(event: Event) {
   const target = event.target as HTMLInputElement
   selectedFile.value = target.files?.[0] || null
+}
+
+function onCoverFileChange(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0] || null
+
+  if (file && !validateCoverFile(file)) {
+    target.value = ""
+    selectedCoverFile.value = null
+    if (coverPreviewUrl.value) {
+      URL.revokeObjectURL(coverPreviewUrl.value)
+      coverPreviewUrl.value = ""
+    }
+    return
+  }
+
+  selectedCoverFile.value = file
+
+  if (coverPreviewUrl.value) {
+    URL.revokeObjectURL(coverPreviewUrl.value)
+    coverPreviewUrl.value = ""
+  }
+
+  if (file) {
+    coverPreviewUrl.value = URL.createObjectURL(file)
+  }
+}
+
+function validateCoverFile(file: File): boolean {
+  if (file.size > MAX_COVER_SIZE_BYTES) {
+    ElMessage.warning("封面图片不能超过 5MB")
+    return false
+  }
+
+  const type = (file.type || "").toLowerCase()
+  if (type) {
+    if (!ALLOWED_COVER_MIME_TYPES.has(type)) {
+      ElMessage.warning("封面仅支持 jpg/jpeg、png、webp 格式")
+      return false
+    }
+    return true
+  }
+
+  const lowerName = file.name.toLowerCase()
+  if (
+    !(
+      lowerName.endsWith(".jpg") ||
+      lowerName.endsWith(".jpeg") ||
+      lowerName.endsWith(".png") ||
+      lowerName.endsWith(".webp")
+    )
+  ) {
+    ElMessage.warning("封面仅支持 jpg/jpeg、png、webp 格式")
+    return false
+  }
+  return true
 }
 
 function resolveUploadVideoId(videoId: number | string, uploadUrl: string): string {
@@ -121,6 +190,10 @@ async function onSubmit() {
       },
     })
 
+    if (selectedCoverFile.value) {
+      await uploadCoverImage(safeVideoId, selectedCoverFile.value)
+    }
+
     const complete = await uploadComplete({
       videoId: safeVideoId,
       objectKey: init.objectKey,
@@ -136,7 +209,15 @@ async function onSubmit() {
     if (fileInput.value) {
       fileInput.value.value = ""
     }
+    if (coverInput.value) {
+      coverInput.value.value = ""
+    }
     selectedFile.value = null
+    selectedCoverFile.value = null
+    if (coverPreviewUrl.value) {
+      URL.revokeObjectURL(coverPreviewUrl.value)
+      coverPreviewUrl.value = ""
+    }
   } catch (err) {
     canRetry.value = true
     const message = err instanceof Error ? err.message : "上传失败，请检查后端服务与文件大小"
@@ -213,10 +294,29 @@ function sleep(ms: number) {
     setTimeout(resolve, ms)
   })
 }
+
+onUnmounted(() => {
+  if (coverPreviewUrl.value) {
+    URL.revokeObjectURL(coverPreviewUrl.value)
+  }
+})
 </script>
 
 <style scoped>
 .status-alert {
   margin-top: 12px;
+}
+
+.cover-preview-wrap {
+  margin-top: 8px;
+}
+
+.cover-preview {
+  width: 220px;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
 }
 </style>

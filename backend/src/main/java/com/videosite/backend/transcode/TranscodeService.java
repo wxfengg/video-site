@@ -31,7 +31,7 @@ public class TranscodeService {
     @Value("${app.transcode.max-retry:3}")
     private int maxRetry;
 
-    @Value("${app.storage.local-root:./data/storage}")
+    @Value("${app.storage.local-root:../}")
     private String localStorageRoot;
 
     public TranscodeService(JdbcTemplate jdbcTemplate,
