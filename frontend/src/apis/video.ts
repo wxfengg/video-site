@@ -163,6 +163,11 @@ export async function unpublishVideo(videoId: number | string) {
   return response.data
 }
 
+export async function deleteVideo(videoId: number | string) {
+  const response = await httpRequest<string>(`/api/admin/videos/${videoId}`, { method: "DELETE" })
+  return response.data
+}
+
 export async function uploadInit(payload: UploadInitRequest) {
   const response = await httpRequest<UploadInitResponse>("/api/videos/upload/init", {
     method: "POST",

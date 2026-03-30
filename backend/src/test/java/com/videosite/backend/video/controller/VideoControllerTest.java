@@ -1,5 +1,7 @@
 package com.videosite.backend.video.controller;
 
+import com.videosite.backend.common.api.ErrorCode;
+import com.videosite.backend.common.exception.BusinessException;
 import com.videosite.backend.video.dto.PageResult;
 import com.videosite.backend.video.dto.VideoDetailResponse;
 import com.videosite.backend.video.dto.VideoListItemResponse;
@@ -17,7 +19,9 @@ import java.util.Collections;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -63,5 +67,27 @@ class VideoControllerTest {
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.id").value(2))
                 .andExpect(jsonPath("$.data.title").value("detail-video"));
+    }
+
+    @Test
+    void deleteVideoShouldReturnOk() throws Exception {
+        when(videoService.deleteVideo(eq(3L))).thenReturn("deleted");
+
+        mockMvc.perform(delete("/api/admin/videos/3"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data").value("deleted"));
+    }
+
+    @Test
+    void deleteVideoShouldRejectWhenNotOffline() throws Exception {
+        doThrow(new BusinessException(ErrorCode.BAD_REQUEST, "仅支持删除已下线视频"))
+                .when(videoService)
+                .deleteVideo(eq(4L));
+
+        mockMvc.perform(delete("/api/admin/videos/4"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000))
+                .andExpect(jsonPath("$.message").value("仅支持删除已下线视频"));
     }
 }

@@ -21,7 +21,7 @@
 
     <template v-else>
       <p class="meta">主指标：{{ report?.metricPrimary || "-" }}</p>
-      <el-table :data="report?.variants || []" v-loading="loading" border>
+      <el-table :data="pagedVariants" v-loading="loading" border>
         <el-table-column prop="variantCode" label="变体" width="120" />
         <el-table-column prop="exposureUv" label="曝光UV" width="140" />
         <el-table-column prop="clickUv" label="点击UV" width="140" />
@@ -29,12 +29,22 @@
           <template #default="scope"> {{ (Number(scope.row.ctr || 0) * 100).toFixed(2) }}% </template>
         </el-table-column>
       </el-table>
+
+      <div class="pager-wrap">
+        <el-pagination
+          layout="total, prev, pager, next"
+          :total="variantsTotal"
+          :page-size="variantsPageSize"
+          :current-page="variantsPage"
+          @current-change="onVariantsPageChange"
+        />
+      </div>
     </template>
   </el-card>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from "vue"
+import { computed, onMounted, ref } from "vue"
 import { ElMessage } from "element-plus"
 import { getAbCtrReport, listAbExperiments, type AbCtrReportResponse, type AbExperiment } from "../../apis/ab"
 
@@ -42,6 +52,15 @@ const loading = ref(false)
 const experiments = ref<AbExperiment[]>([])
 const selectedExperimentId = ref<number | null>(null)
 const report = ref<AbCtrReportResponse | null>(null)
+const variantsPage = ref(1)
+const variantsPageSize = 10
+
+const variantsTotal = computed(() => report.value?.variants?.length || 0)
+const pagedVariants = computed(() => {
+  const variants = report.value?.variants || []
+  const start = (variantsPage.value - 1) * variantsPageSize
+  return variants.slice(start, start + variantsPageSize)
+})
 
 onMounted(async () => {
   await loadExperiments()
@@ -70,11 +89,16 @@ async function reloadReport() {
   loading.value = true
   try {
     report.value = await getAbCtrReport(selectedExperimentId.value)
+    variantsPage.value = 1
   } catch (_err) {
     ElMessage.error("加载 CTR 报表失败")
   } finally {
     loading.value = false
   }
+}
+
+function onVariantsPageChange(nextPage: number) {
+  variantsPage.value = nextPage
 }
 </script>
 
@@ -88,5 +112,11 @@ async function reloadReport() {
 .meta {
   margin: 0 0 12px;
   color: #606266;
+}
+
+.pager-wrap {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
 }
 </style>

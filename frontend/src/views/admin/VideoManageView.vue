@@ -9,7 +9,7 @@
             placeholder="状态筛选"
             style="width: 140px"
             aria-label="视频状态筛选"
-            @change="reload"
+            @change="onFilterChange"
           >
             <el-option label="全部" value="" />
             <el-option label="草稿" value="draft" />
@@ -25,22 +25,26 @@
             style="width: 220px"
             name="adminVideoKeyword"
             aria-label="管理端视频搜索"
-            @keyup.enter="reload"
+            @keyup.enter="onFilterChange"
+            @clear="onFilterChange"
           />
         </el-space>
       </div>
     </template>
 
-    <el-table :data="rows" v-loading="loading" border>
+    <el-table :data="pagedRows" v-loading="loading" border>
       <el-table-column prop="id" label="ID" width="160" />
       <el-table-column prop="title" label="标题" min-width="180" />
       <el-table-column prop="status" label="状态" width="120" />
-      <el-table-column label="操作" width="340" fixed="right">
+      <el-table-column label="操作" width="420" fixed="right">
         <template #default="scope">
           <el-space>
             <el-button size="small" @click="openEdit(scope.row)">编辑</el-button>
             <el-button size="small" type="success" @click="onPublish(scope.row.id)">发布</el-button>
             <el-button size="small" type="warning" @click="onUnpublish(scope.row.id)">下线</el-button>
+            <el-button v-if="scope.row.status === 'offline'" size="small" type="danger" @click="onDelete(scope.row)">
+              删除
+            </el-button>
             <el-button size="small" @click="openPlayer(scope.row)">预览</el-button>
           </el-space>
         </template>
@@ -49,10 +53,12 @@
 
     <div class="pager-wrap">
       <el-pagination
-        layout="total, prev, pager, next"
+        layout="total, sizes, prev, pager, next"
         :total="total"
         :page-size="pageSize"
         :current-page="page"
+        :page-sizes="[10, 20, 50]"
+        @size-change="onPageSizeChange"
         @current-change="onPageChange"
       />
     </div>
@@ -96,10 +102,11 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue"
+import { computed, onMounted, reactive, ref } from "vue"
 import { useRouter } from "vue-router"
-import { ElMessage } from "element-plus"
+import { ElMessage, ElMessageBox } from "element-plus"
 import {
+  deleteVideo,
   getAdminVideo,
   getAdminVideos,
   publishVideo,
@@ -113,10 +120,15 @@ const router = useRouter()
 const loading = ref(false)
 const rows = ref<VideoListItem[]>([])
 const page = ref(1)
-const pageSize = 10
-const total = ref(0)
+const pageSize = ref(10)
 const status = ref("")
 const keyword = ref("")
+
+const total = computed(() => rows.value.length)
+const pagedRows = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return rows.value.slice(start, start + pageSize.value)
+})
 
 const editVisible = ref(false)
 const editId = ref<string | number | null>(null)
@@ -139,9 +151,13 @@ onMounted(async () => {
 async function reload() {
   loading.value = true
   try {
-    const data = await getAdminVideos(page.value, pageSize, status.value, keyword.value)
+    const data = await getAdminVideos(1, 1000, status.value, keyword.value)
     rows.value = data.records || []
-    total.value = data.total || 0
+
+    const maxPage = Math.max(1, Math.ceil(rows.value.length / pageSize.value))
+    if (page.value > maxPage) {
+      page.value = maxPage
+    }
   } catch (_err) {
     ElMessage.error("加载管理列表失败")
   } finally {
@@ -149,9 +165,18 @@ async function reload() {
   }
 }
 
+async function onFilterChange() {
+  page.value = 1
+  await reload()
+}
+
+async function onPageSizeChange(size: number) {
+  pageSize.value = size
+  page.value = 1
+}
+
 async function onPageChange(next: number) {
   page.value = next
-  await reload()
 }
 
 async function openEdit(row: VideoListItem) {
@@ -276,6 +301,32 @@ async function onUnpublish(videoId: number | string) {
     await reload()
   } catch (_err) {
     ElMessage.error("下线失败")
+  }
+}
+
+async function onDelete(row: VideoListItem) {
+  if (row.status !== "offline") {
+    ElMessage.warning("仅支持删除已下线视频")
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm("删除后不可恢复，确认删除该视频吗？", "删除确认", {
+      type: "warning",
+      confirmButtonText: "删除",
+      cancelButtonText: "取消",
+    })
+  } catch (_err) {
+    return
+  }
+
+  try {
+    await deleteVideo(row.id)
+    ElMessage.success("删除成功")
+    await reload()
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "删除失败"
+    ElMessage.error(message)
   }
 }
 

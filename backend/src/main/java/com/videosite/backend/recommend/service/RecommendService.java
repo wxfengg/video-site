@@ -41,8 +41,11 @@ public class RecommendService {
         }
 
         List<RecommendationItemResponse> rows = jdbcTemplate.query(
-                "SELECT video_id, rank_index, score_total, score_content, score_cf, score_hot " +
-                        "FROM recommendation_result WHERE visitor_id = ? AND scene = 'home' AND version_hour = ? ORDER BY rank_index ASC LIMIT ?",
+            "SELECT rr.video_id, rr.rank_index, rr.score_total, rr.score_content, rr.score_cf, rr.score_hot " +
+                "FROM recommendation_result rr " +
+                "JOIN video v ON v.id = rr.video_id " +
+                "WHERE rr.visitor_id = ? AND rr.scene = 'home' AND rr.version_hour = ? AND v.status = 'published' " +
+                "ORDER BY rr.rank_index ASC LIMIT ?",
                 (rs, rowNum) -> {
                     RecommendationItemResponse item = new RecommendationItemResponse();
                     item.setVideoId(rs.getLong("video_id"));

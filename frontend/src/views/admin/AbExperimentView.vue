@@ -7,7 +7,7 @@
       </div>
     </template>
 
-    <el-table :data="rows" v-loading="loading" border>
+    <el-table :data="pagedRows" v-loading="loading" border>
       <el-table-column prop="name" label="实验名" min-width="160" />
       <el-table-column prop="scene" label="场景" width="120" />
       <el-table-column prop="targetVideoId" label="目标视频ID" width="140" />
@@ -33,6 +33,16 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <div class="pager-wrap">
+      <el-pagination
+        layout="total, prev, pager, next"
+        :total="total"
+        :page-size="pageSize"
+        :current-page="page"
+        @current-change="onPageChange"
+      />
+    </div>
   </el-card>
 
   <el-dialog v-model="dialogVisible" :title="editingId ? '编辑实验' : '新建实验'" width="680px">
@@ -70,7 +80,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue"
+import { computed, onMounted, reactive, ref } from "vue"
 import { ElMessage } from "element-plus"
 import {
   createAbExperiment,
@@ -83,8 +93,16 @@ import {
 
 const loading = ref(false)
 const rows = ref<AbExperiment[]>([])
+const page = ref(1)
+const pageSize = 10
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
+
+const total = computed(() => rows.value.length)
+const pagedRows = computed(() => {
+  const start = (page.value - 1) * pageSize
+  return rows.value.slice(start, start + pageSize)
+})
 
 const form = reactive({
   name: "",
@@ -105,11 +123,19 @@ async function reload() {
   loading.value = true
   try {
     rows.value = await listAbExperiments()
+    const maxPage = Math.max(1, Math.ceil(rows.value.length / pageSize))
+    if (page.value > maxPage) {
+      page.value = maxPage
+    }
   } catch (_err) {
     ElMessage.error("加载实验列表失败")
   } finally {
     loading.value = false
   }
+}
+
+function onPageChange(nextPage: number) {
+  page.value = nextPage
 }
 
 function resetForm() {
@@ -223,5 +249,11 @@ async function onStop(experimentId: number) {
   align-items: center;
   gap: 10px;
   margin-bottom: 10px;
+}
+
+.pager-wrap {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
 }
 </style>

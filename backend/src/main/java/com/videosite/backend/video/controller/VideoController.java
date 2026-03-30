@@ -7,6 +7,7 @@ import com.videosite.backend.video.dto.VideoListItemResponse;
 import com.videosite.backend.video.dto.VideoPlaySourcesResponse;
 import com.videosite.backend.video.dto.VideoUpdateRequest;
 import com.videosite.backend.video.service.VideoService;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -75,5 +76,10 @@ public class VideoController {
     @PostMapping("/api/admin/videos/{videoId}/unpublish")
     public ApiResponse<VideoDetailResponse> unpublishVideo(@PathVariable("videoId") Long videoId) {
         return ApiResponse.success(videoService.unpublishVideo(videoId));
+    }
+
+    @DeleteMapping("/api/admin/videos/{videoId}")
+    public ApiResponse<String> deleteVideo(@PathVariable("videoId") Long videoId) {
+        return ApiResponse.success(videoService.deleteVideo(videoId));
     }
 }

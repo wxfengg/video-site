@@ -145,6 +145,29 @@ public class VideoService {
         return getVideoDetail(videoId, true);
     }
 
+    @Transactional(rollbackFor = Exception.class)
+    public String deleteVideo(Long videoId) {
+        VideoDetailResponse detail = getVideoDetail(videoId, true);
+        if (!"offline".equals(detail.getStatus())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "仅支持删除已下线视频");
+        }
+
+        jdbcTemplate.update("DELETE FROM recommendation_result WHERE video_id = ?", videoId);
+        jdbcTemplate.update("DELETE FROM video_similarity WHERE video_id = ? OR related_video_id = ?", videoId, videoId);
+        jdbcTemplate.update("DELETE FROM video_tfidf_profile WHERE video_id = ?", videoId);
+        jdbcTemplate.update("DELETE FROM cover_analysis_task WHERE video_id = ?", videoId);
+        jdbcTemplate.update("DELETE FROM video_tag WHERE video_id = ?", videoId);
+
+        jdbcTemplate.update("DELETE FROM video_play_source WHERE video_id = ?", videoId);
+        jdbcTemplate.update("DELETE FROM video_variant WHERE video_id = ?", videoId);
+        jdbcTemplate.update("DELETE FROM video_transcode_task WHERE video_id = ?", videoId);
+        jdbcTemplate.update("DELETE FROM video_file WHERE video_id = ?", videoId);
+
+        jdbcTemplate.update("DELETE FROM video WHERE id = ?", videoId);
+
+        return "deleted";
+    }
+
     private PageResult<VideoListItemResponse> listVideos(int page, int pageSize, String status, String keyword) {
         int safePage = Math.max(page, 1);
         int safePageSize = Math.max(1, Math.min(pageSize, MAX_PAGE_SIZE));
