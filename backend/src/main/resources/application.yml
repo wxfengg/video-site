@@ -45,3 +45,6 @@ app:
     worker-cron: ${COVER_ANALYSIS_WORKER_CRON:0/20 * * * * ?}
   recommend:
     worker-cron: ${RECOMMEND_WORKER_CRON:0 5 * * * ?}
+  hot-rank:
+    worker-cron: ${HOT_RANK_WORKER_CRON:15 0/5 * * * ?}
+    top-n: ${HOT_RANK_TOP_N:50}

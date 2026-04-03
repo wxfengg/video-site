@@ -44,6 +44,44 @@
         上传成功：videoId={{ lastResult.videoId }}, transcodeTaskId={{ lastResult.transcodeTaskId }}
       </template>
     </el-alert>
+
+    <el-divider />
+
+    <el-form label-width="120px" @submit.prevent>
+      <el-form-item>
+        <h3 class="section-title">外链视频录入（直链 MP4/HLS）</h3>
+      </el-form-item>
+      <el-form-item label="标题" required>
+        <el-input v-model="externalForm.title" maxlength="255" placeholder="请输入外链视频标题" />
+      </el-form-item>
+      <el-form-item label="简介">
+        <el-input v-model="externalForm.description" type="textarea" :rows="3" maxlength="2000" />
+      </el-form-item>
+      <el-form-item label="协议" required>
+        <el-select v-model="externalForm.sourceProtocol" style="width: 180px">
+          <el-option label="HLS(m3u8)" value="hls" />
+          <el-option label="MP4" value="mp4" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="外链地址" required>
+        <el-input v-model="externalForm.sourceUrl" placeholder="https://example.com/master.m3u8" />
+      </el-form-item>
+      <el-form-item label="封面URL">
+        <el-input v-model="externalForm.coverUrl" placeholder="可选：封面图片地址" />
+      </el-form-item>
+      <el-form-item label="时长(秒)">
+        <el-input-number v-model="externalForm.durationSec" :min="1" :max="86400" />
+      </el-form-item>
+      <el-form-item>
+        <el-button type="primary" :loading="externalSubmitting" @click="onSubmitExternal">录入外链视频</el-button>
+      </el-form-item>
+    </el-form>
+
+    <el-alert v-if="externalResult" type="success" show-icon :closable="false">
+      <template #title>
+        外链视频已创建：videoId={{ externalResult.id }}，当前状态={{ externalResult.status }}
+      </template>
+    </el-alert>
   </el-card>
 </template>
 
@@ -51,11 +89,13 @@
 import { onUnmounted, reactive, ref } from "vue"
 import { ElMessage } from "element-plus"
 import {
+  createExternalVideo,
   getAdminVideo,
   uploadComplete,
   uploadCoverImage,
   uploadInit,
   uploadLocalFileWithProgress,
+  type VideoDetail,
   type UploadCompleteResponse,
 } from "../../apis/video"
 
@@ -70,10 +110,21 @@ const uploadProgress = ref(0)
 const transcodeStatusText = ref("")
 const canRetry = ref(false)
 const lastInit = ref<{ videoId: string; objectKey: string; uploadUrl: string } | null>(null)
+const externalSubmitting = ref(false)
+const externalResult = ref<VideoDetail | null>(null)
 
 const form = reactive({
   title: "",
   description: "",
+})
+
+const externalForm = reactive({
+  title: "",
+  description: "",
+  sourceProtocol: "hls" as "hls" | "mp4",
+  sourceUrl: "",
+  coverUrl: "",
+  durationSec: undefined as number | undefined,
 })
 
 const MAX_COVER_SIZE_BYTES = 5 * 1024 * 1024
@@ -289,6 +340,42 @@ async function pollVideoStatus(videoId: number | string) {
   }
 }
 
+async function onSubmitExternal() {
+  if (!externalForm.title.trim()) {
+    ElMessage.warning("请填写外链视频标题")
+    return
+  }
+  if (!externalForm.sourceUrl.trim()) {
+    ElMessage.warning("请填写外链地址")
+    return
+  }
+
+  externalSubmitting.value = true
+  try {
+    const created = await createExternalVideo({
+      title: externalForm.title.trim(),
+      description: externalForm.description.trim() || undefined,
+      coverUrl: externalForm.coverUrl.trim() || undefined,
+      sourceProtocol: externalForm.sourceProtocol,
+      sourceUrl: externalForm.sourceUrl.trim(),
+      durationSec: externalForm.durationSec,
+    })
+    externalResult.value = created
+    ElMessage.success("外链视频创建成功")
+
+    externalForm.title = ""
+    externalForm.description = ""
+    externalForm.sourceUrl = ""
+    externalForm.coverUrl = ""
+    externalForm.durationSec = undefined
+    externalForm.sourceProtocol = "hls"
+  } catch (_err) {
+    ElMessage.error("外链视频创建失败，请检查直链格式")
+  } finally {
+    externalSubmitting.value = false
+  }
+}
+
 function sleep(ms: number) {
   return new Promise<void>((resolve) => {
     setTimeout(resolve, ms)
@@ -318,5 +405,10 @@ onUnmounted(() => {
   object-fit: cover;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 16px;
 }
 </style>

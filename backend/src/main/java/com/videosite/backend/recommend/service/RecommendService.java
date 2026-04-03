@@ -10,6 +10,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import javax.servlet.http.HttpServletRequest;
+import java.math.BigDecimal;
+import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -27,6 +29,8 @@ public class RecommendService {
     private static final double ALPHA = 0.6;
     private static final double BETA = 0.2;
     private static final double GAMMA = 0.2;
+    private static final String HOT_RANK_WINDOW_FOR_RECOMMEND = "7d";
+    private static final String HOT_RANK_WINDOW_FOR_FALLBACK = "24h";
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -179,23 +183,89 @@ public class RecommendService {
     }
 
     private Map<Long, Double> loadHotScores(List<Long> candidates) {
+        Map<Long, Double> snapshotScores = loadHotScoresFromSnapshot(candidates, HOT_RANK_WINDOW_FOR_RECOMMEND);
+        if (!snapshotScores.isEmpty()) {
+            return snapshotScores;
+        }
+
+        return loadHotScoresFromEventLog(candidates);
+    }
+
+    private Map<Long, Double> loadHotScoresFromSnapshot(List<Long> candidates, String windowType) {
+        List<Timestamp> bucketRows = jdbcTemplate.query(
+                "SELECT bucket_time FROM video_hot_rank_5m WHERE window_type = ? ORDER BY bucket_time DESC LIMIT 1",
+                (rs, rowNum) -> rs.getTimestamp("bucket_time"),
+                windowType
+        );
+        if (bucketRows.isEmpty()) {
+            return Map.of();
+        }
+
+        Timestamp latestBucketTime = bucketRows.get(0);
+        Set<Long> candidateSet = new HashSet<>(candidates);
+
+        List<HotScoreRow> rows = jdbcTemplate.query(
+                "SELECT video_id, hot_score FROM video_hot_rank_5m WHERE window_type = ? AND bucket_time = ?",
+                (rs, rowNum) -> new HotScoreRow(rs.getLong("video_id"), rs.getBigDecimal("hot_score")),
+                windowType,
+                latestBucketTime
+        );
+
         Map<Long, Double> raw = new HashMap<>();
-        double max = 0;
+        for (HotScoreRow row : rows) {
+            if (candidateSet.contains(row.videoId)) {
+                raw.put(row.videoId, row.hotScore);
+            }
+        }
+
+        if (raw.isEmpty()) {
+            return Map.of();
+        }
+
+        return normalizeRawScores(candidates, raw);
+    }
+
+    private Map<Long, Double> loadHotScoresFromEventLog(List<Long> candidates) {
+        Map<Long, Double> raw = new HashMap<>();
         for (Long videoId : candidates) {
             Double score = jdbcTemplate.queryForObject(
-                    "SELECT COALESCE(SUM(CASE event_type WHEN 'play' THEN 2 WHEN 'click' THEN 1.5 WHEN 'exposure' THEN 0.5 ELSE 0 END), 0) " +
+                    "SELECT COALESCE(SUM(CASE event_type " +
+                            "WHEN 'play' THEN 2 " +
+                            "WHEN 'click' THEN 1.5 " +
+                            "WHEN 'exposure' THEN 0.5 " +
+                            "WHEN 'complete' THEN 3 " +
+                            "WHEN 'like' THEN 2.5 " +
+                            "WHEN 'comment' THEN 3.5 " +
+                            "WHEN 'unlike' THEN -1.5 " +
+                            "WHEN 'comment_delete' THEN -2 " +
+                            "ELSE 0 END), 0) " +
                             "FROM event_log WHERE video_id = ? AND event_time >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
                     Double.class,
                     videoId
             );
             double value = score == null ? 0 : score;
             raw.put(videoId, value);
+        }
+
+        return normalizeRawScores(candidates, raw);
+    }
+
+    private Map<Long, Double> normalizeRawScores(List<Long> candidates, Map<Long, Double> raw) {
+        double max = 0;
+        for (double value : raw.values()) {
             max = Math.max(max, value);
         }
 
         Map<Long, Double> normalized = new HashMap<>();
-        for (Map.Entry<Long, Double> entry : raw.entrySet()) {
-            normalized.put(entry.getKey(), max <= 0 ? 0 : entry.getValue() / max);
+        if (max <= 0) {
+            for (Long candidate : candidates) {
+                normalized.put(candidate, 0d);
+            }
+            return normalized;
+        }
+
+        for (Long candidate : candidates) {
+            normalized.put(candidate, raw.getOrDefault(candidate, 0d) / max);
         }
         return normalized;
     }
@@ -260,6 +330,44 @@ public class RecommendService {
     }
 
     private List<RecommendationItemResponse> fallbackByHot(int limit) {
+        List<Timestamp> bucketRows = jdbcTemplate.query(
+                "SELECT bucket_time FROM video_hot_rank_5m WHERE window_type = ? ORDER BY bucket_time DESC LIMIT 1",
+                (rs, rowNum) -> rs.getTimestamp("bucket_time"),
+                HOT_RANK_WINDOW_FOR_FALLBACK
+        );
+
+        if (!bucketRows.isEmpty()) {
+            Timestamp latestBucketTime = bucketRows.get(0);
+            List<RecommendationItemResponse> hotRows = jdbcTemplate.query(
+                    "SELECT r.video_id, r.rank_index, r.hot_score " +
+                            "FROM video_hot_rank_5m r " +
+                            "JOIN video v ON v.id = r.video_id " +
+                            "WHERE r.window_type = ? AND r.bucket_time = ? AND v.status = 'published' " +
+                            "ORDER BY r.rank_index ASC LIMIT ?",
+                    (rs, rowNum) -> {
+                        RecommendationItemResponse item = new RecommendationItemResponse();
+                        item.setVideoId(rs.getLong("video_id"));
+                        item.setRankIndex(rs.getInt("rank_index"));
+
+                        BigDecimal hotScore = rs.getBigDecimal("hot_score");
+                        double safeHotScore = hotScore == null ? 0d : hotScore.doubleValue();
+
+                        item.setScoreTotal(safeHotScore);
+                        item.setScoreContent(0d);
+                        item.setScoreCf(0d);
+                        item.setScoreHot(safeHotScore);
+                        return item;
+                    },
+                    HOT_RANK_WINDOW_FOR_FALLBACK,
+                    latestBucketTime,
+                    limit
+            );
+
+            if (!hotRows.isEmpty()) {
+                return hotRows;
+            }
+        }
+
         return jdbcTemplate.query(
                 "SELECT v.id AS video_id FROM video v WHERE v.status = 'published' ORDER BY v.publish_at DESC LIMIT ?",
                 (rs, rowNum) -> {
@@ -477,6 +585,16 @@ public class RecommendService {
 
         public double getTotalScore() {
             return totalScore;
+        }
+    }
+
+    private static class HotScoreRow {
+        private final Long videoId;
+        private final double hotScore;
+
+        private HotScoreRow(Long videoId, BigDecimal hotScore) {
+            this.videoId = videoId;
+            this.hotScore = hotScore == null ? 0d : hotScore.doubleValue();
         }
     }
 }

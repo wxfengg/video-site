@@ -87,6 +87,41 @@ export interface RecommendationItem {
   scoreHot: number
 }
 
+export interface VideoHotRankItem {
+  windowType: "24h" | "7d"
+  bucketTime: string
+  videoId: number | string
+  rankIndex: number
+  hotScore: number
+  title: string
+  coverUrl: string | null
+  durationSec: number | null
+  publishAt: string | null
+}
+
+export interface VideoLikeSummary {
+  videoId: number | string
+  likeCount: number
+  likedByCurrentUser: boolean
+}
+
+export interface VideoCommentItem {
+  id: number | string
+  userId: number | string
+  username: string
+  content: string
+  createdAt: string
+}
+
+export interface ExternalVideoCreateRequest {
+  title: string
+  description?: string
+  coverUrl?: string
+  sourceProtocol: "mp4" | "hls"
+  sourceUrl: string
+  durationSec?: number
+}
+
 function queryString(params: Record<string, unknown>): string {
   const search = new URLSearchParams()
   Object.entries(params).forEach(([key, value]) => {
@@ -109,6 +144,13 @@ export async function getPublicVideos(page = 1, pageSize = 12, keyword = "") {
 
 export async function getHomeRecommendations(limit = 12) {
   const response = await httpRequest<RecommendationItem[]>(`/api/recommend/home${queryString({ limit })}`, {
+    method: "GET",
+  })
+  return response.data
+}
+
+export async function getHotRank(windowType: "24h" | "7d" = "24h", limit = 10) {
+  const response = await httpRequest<VideoHotRankItem[]>(`/api/recommend/hot${queryString({ windowType, limit })}`, {
     method: "GET",
   })
   return response.data
@@ -279,5 +321,51 @@ export async function uploadCoverImage(videoId: number | string, file: File) {
     throw new Error(response.message || "封面上传失败")
   }
 
+  return response.data
+}
+
+export async function createExternalVideo(payload: ExternalVideoCreateRequest) {
+  const response = await httpRequest<VideoDetail>("/api/admin/videos/external", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  })
+  return response.data
+}
+
+export async function getVideoLikeSummary(videoId: number | string) {
+  const response = await httpRequest<VideoLikeSummary>(`/api/videos/${videoId}/likes/summary`, { method: "GET" })
+  return response.data
+}
+
+export async function addVideoLike(videoId: number | string) {
+  const response = await httpRequest<string>(`/api/videos/${videoId}/likes`, { method: "POST" })
+  return response.data
+}
+
+export async function removeVideoLike(videoId: number | string) {
+  const response = await httpRequest<string>(`/api/videos/${videoId}/likes`, { method: "DELETE" })
+  return response.data
+}
+
+export async function getVideoComments(videoId: number | string, page = 1, pageSize = 20) {
+  const response = await httpRequest<PageResult<VideoCommentItem>>(
+    `/api/videos/${videoId}/comments${queryString({ page, pageSize })}`,
+    { method: "GET" },
+  )
+  return response.data
+}
+
+export async function createVideoComment(videoId: number | string, content: string) {
+  const response = await httpRequest<VideoCommentItem>(`/api/videos/${videoId}/comments`, {
+    method: "POST",
+    body: JSON.stringify({ content }),
+  })
+  return response.data
+}
+
+export async function deleteVideoComment(videoId: number | string, commentId: number | string) {
+  const response = await httpRequest<string>(`/api/videos/${videoId}/comments/${commentId}`, {
+    method: "DELETE",
+  })
   return response.data
 }

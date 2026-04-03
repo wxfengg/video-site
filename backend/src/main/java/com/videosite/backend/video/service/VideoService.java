@@ -1,7 +1,9 @@
 package com.videosite.backend.video.service;
 
+import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.videosite.backend.common.api.ErrorCode;
 import com.videosite.backend.common.exception.BusinessException;
+import com.videosite.backend.video.dto.ExternalVideoCreateRequest;
 import com.videosite.backend.video.dto.PageResult;
 import com.videosite.backend.video.dto.VideoDetailResponse;
 import com.videosite.backend.video.dto.VideoListItemResponse;
@@ -18,6 +20,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 @Service
 public class VideoService {
@@ -65,18 +68,14 @@ public class VideoService {
             throw new BusinessException(ErrorCode.PLAY_SOURCE_NOT_READY, "视频尚未准备好播放源");
         }
 
+        VideoPlaySourcesResponse response = new VideoPlaySourcesResponse();
+        response.setVideoId(videoId);
+
         List<SourceItem> sourceItems = jdbcTemplate.query(
                 "SELECT source_type, play_url FROM video_play_source WHERE video_id = ?",
                 (rs, rowNum) -> new SourceItem(rs.getString("source_type"), rs.getString("play_url")),
                 videoId
         );
-
-        if (sourceItems.isEmpty()) {
-            throw new BusinessException(ErrorCode.PLAY_SOURCE_NOT_READY, "播放源尚未生成");
-        }
-
-        VideoPlaySourcesResponse response = new VideoPlaySourcesResponse();
-        response.setVideoId(videoId);
         for (SourceItem item : sourceItems) {
             switch (item.sourceType) {
                 case "hls_master":
@@ -96,14 +95,49 @@ public class VideoService {
             }
         }
 
-        if (!StringUtils.hasText(response.getHlsMasterUrl())
-                && !StringUtils.hasText(response.getMp4360Url())
-                && !StringUtils.hasText(response.getMp4720Url())
-                && !StringUtils.hasText(response.getMp41080Url())) {
+        if (hasNoPlayableSource(response)) {
+            attachExternalSource(videoId, response);
+        }
+
+        if (hasNoPlayableSource(response)) {
             throw new BusinessException(ErrorCode.PLAY_SOURCE_NOT_READY, "播放源尚未就绪");
         }
 
         return response;
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public VideoDetailResponse createExternalVideo(ExternalVideoCreateRequest request) {
+        String protocol = request.getSourceProtocol().trim().toLowerCase(Locale.ROOT);
+        String sourceUrl = request.getSourceUrl().trim();
+
+        String lowerUrl = sourceUrl.toLowerCase(Locale.ROOT);
+        if ("hls".equals(protocol) && !lowerUrl.contains(".m3u8")) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "HLS 外链需为 m3u8 直链");
+        }
+        if ("mp4".equals(protocol) && !lowerUrl.contains(".mp4")) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "MP4 外链需为 mp4 直链");
+        }
+
+        Long videoId = IdWorker.getId();
+        jdbcTemplate.update(
+                "INSERT INTO video (id, title, description, cover_url, duration_sec, status, publish_at, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'ready', NULL, NULL, NOW(), NOW())",
+                videoId,
+                request.getTitle().trim(),
+                emptyToNull(request.getDescription()),
+                emptyToNull(request.getCoverUrl()),
+                request.getDurationSec()
+        );
+
+        jdbcTemplate.update(
+                "INSERT INTO video_source (id, video_id, source_mode, source_protocol, source_url, created_at, updated_at) VALUES (?, ?, 'external', ?, ?, NOW(), NOW())",
+                IdWorker.getId(),
+                videoId,
+                protocol,
+                sourceUrl
+        );
+
+        return getVideoDetail(videoId, true);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -158,14 +192,59 @@ public class VideoService {
         jdbcTemplate.update("DELETE FROM cover_analysis_task WHERE video_id = ?", videoId);
         jdbcTemplate.update("DELETE FROM video_tag WHERE video_id = ?", videoId);
 
+        jdbcTemplate.update("DELETE FROM metric_video_5m WHERE video_id = ?", videoId);
+        jdbcTemplate.update("DELETE FROM video_hot_rank_5m WHERE video_id = ?", videoId);
+
+        jdbcTemplate.update("DELETE FROM video_like WHERE video_id = ?", videoId);
+        jdbcTemplate.update("DELETE FROM video_comment WHERE video_id = ?", videoId);
+        jdbcTemplate.update("DELETE FROM user_favorite WHERE video_id = ?", videoId);
+        jdbcTemplate.update("DELETE FROM user_watch_history WHERE video_id = ?", videoId);
+
         jdbcTemplate.update("DELETE FROM video_play_source WHERE video_id = ?", videoId);
         jdbcTemplate.update("DELETE FROM video_variant WHERE video_id = ?", videoId);
         jdbcTemplate.update("DELETE FROM video_transcode_task WHERE video_id = ?", videoId);
         jdbcTemplate.update("DELETE FROM video_file WHERE video_id = ?", videoId);
+        jdbcTemplate.update("DELETE FROM video_source WHERE video_id = ?", videoId);
 
         jdbcTemplate.update("DELETE FROM video WHERE id = ?", videoId);
 
         return "deleted";
+    }
+
+    private void attachExternalSource(Long videoId, VideoPlaySourcesResponse response) {
+        List<ExternalSourceItem> rows = jdbcTemplate.query(
+                "SELECT source_protocol, source_url FROM video_source WHERE video_id = ? AND source_mode = 'external' ORDER BY updated_at DESC LIMIT 1",
+                (rs, rowNum) -> new ExternalSourceItem(rs.getString("source_protocol"), rs.getString("source_url")),
+                videoId
+        );
+
+        if (rows.isEmpty()) {
+            return;
+        }
+
+        ExternalSourceItem external = rows.get(0);
+        if (!StringUtils.hasText(external.sourceUrl)) {
+            return;
+        }
+
+        if ("hls".equalsIgnoreCase(external.sourceProtocol)) {
+            response.setHlsMasterUrl(external.sourceUrl);
+            return;
+        }
+        if ("mp4".equalsIgnoreCase(external.sourceProtocol)) {
+            response.setMp41080Url(external.sourceUrl);
+        }
+    }
+
+    private boolean hasNoPlayableSource(VideoPlaySourcesResponse response) {
+        return !StringUtils.hasText(response.getHlsMasterUrl())
+                && !StringUtils.hasText(response.getMp4360Url())
+                && !StringUtils.hasText(response.getMp4720Url())
+                && !StringUtils.hasText(response.getMp41080Url());
+    }
+
+    private String emptyToNull(String text) {
+        return StringUtils.hasText(text) ? text.trim() : null;
     }
 
     private PageResult<VideoListItemResponse> listVideos(int page, int pageSize, String status, String keyword) {
@@ -243,6 +322,16 @@ public class VideoService {
         private SourceItem(String sourceType, String playUrl) {
             this.sourceType = sourceType;
             this.playUrl = playUrl;
+        }
+    }
+
+    private static class ExternalSourceItem {
+        private final String sourceProtocol;
+        private final String sourceUrl;
+
+        private ExternalSourceItem(String sourceProtocol, String sourceUrl) {
+            this.sourceProtocol = sourceProtocol;
+            this.sourceUrl = sourceUrl;
         }
     }
 }

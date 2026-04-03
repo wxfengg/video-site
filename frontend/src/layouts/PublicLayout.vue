@@ -9,7 +9,22 @@
             <span class="brand-subtitle">SaaS 推荐体验</span>
           </span>
         </router-link>
-        <span class="header-badge">BETA</span>
+        <div class="header-actions">
+          <router-link to="/" class="nav-link">首页</router-link>
+          <router-link to="/me/favorites" class="nav-link">我的收藏</router-link>
+          <router-link to="/me/history" class="nav-link">观看历史</router-link>
+
+          <template v-if="userSession.loggedIn">
+            <span class="user-pill">{{ userSession.username }}</span>
+            <el-button size="small" text @click="onLogout">退出</el-button>
+          </template>
+          <template v-else>
+            <router-link to="/user/login" class="nav-link">登录</router-link>
+            <router-link to="/user/register" class="nav-link">注册</router-link>
+          </template>
+
+          <span class="header-badge">BETA</span>
+        </div>
       </div>
     </el-header>
 
@@ -18,6 +33,48 @@
     </el-main>
   </el-container>
 </template>
+
+<script setup lang="ts">
+import { onMounted, reactive, watch } from "vue"
+import { useRoute, useRouter } from "vue-router"
+import { fetchUserSession, logoutUser } from "../apis/user"
+
+const route = useRoute()
+const router = useRouter()
+
+const userSession = reactive({
+  loggedIn: false,
+  username: null as string | null,
+})
+
+async function syncUserSession() {
+  try {
+    const session = await fetchUserSession()
+    userSession.loggedIn = session.loggedIn
+    userSession.username = session.username
+  } catch (_err) {
+    userSession.loggedIn = false
+    userSession.username = null
+  }
+}
+
+async function onLogout() {
+  await logoutUser()
+  await syncUserSession()
+  await router.push("/")
+}
+
+onMounted(() => {
+  void syncUserSession()
+})
+
+watch(
+  () => route.fullPath,
+  () => {
+    void syncUserSession()
+  },
+)
+</script>
 
 <style scoped>
 .public-layout {
@@ -42,6 +99,38 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nav-link {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  color: #3f4d69;
+  font-size: 13px;
+}
+
+.nav-link:hover {
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.user-pill {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  color: #3854a7;
+  border: 1px solid rgba(78, 124, 255, 0.2);
+  background: rgba(78, 124, 255, 0.1);
 }
 
 .brand {
@@ -109,7 +198,10 @@
   }
 
   .brand-subtitle,
-  .header-badge {
+  .header-badge,
+  .nav-link:nth-child(2),
+  .nav-link:nth-child(3),
+  .user-pill {
     display: none;
   }
 

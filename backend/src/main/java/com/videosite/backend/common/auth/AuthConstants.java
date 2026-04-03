@@ -8,6 +8,9 @@ public final class AuthConstants {
 
     public static final String ADMIN_SESSION_KEY = "ADMIN_LOGIN_USER";
 
+    public static final String USER_SESSION_USER_ID_KEY = "USER_LOGIN_ID";
+    public static final String USER_SESSION_USERNAME_KEY = "USER_LOGIN_NAME";
+
     private AuthConstants() {
     }
 }

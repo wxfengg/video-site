@@ -2,6 +2,7 @@ package com.videosite.backend.video.controller;
 
 import com.videosite.backend.common.api.ApiResponse;
 import com.videosite.backend.video.dto.PageResult;
+import com.videosite.backend.video.dto.ExternalVideoCreateRequest;
 import com.videosite.backend.video.dto.VideoDetailResponse;
 import com.videosite.backend.video.dto.VideoListItemResponse;
 import com.videosite.backend.video.dto.VideoPlaySourcesResponse;
@@ -81,5 +82,10 @@ public class VideoController {
     @DeleteMapping("/api/admin/videos/{videoId}")
     public ApiResponse<String> deleteVideo(@PathVariable("videoId") Long videoId) {
         return ApiResponse.success(videoService.deleteVideo(videoId));
+    }
+
+    @PostMapping("/api/admin/videos/external")
+    public ApiResponse<VideoDetailResponse> createExternalVideo(@Valid @RequestBody ExternalVideoCreateRequest request) {
+        return ApiResponse.success(videoService.createExternalVideo(request));
     }
 }

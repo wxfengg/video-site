@@ -17,6 +17,7 @@ $client.Timeout = [TimeSpan]::FromSeconds(30)
 $results = @()
 $videoId = $null
 $abExperimentId = $null
+$createdUserName = $null
 
 function Add-Result {
   param(
@@ -240,6 +241,52 @@ try {
     $publish = Invoke-Api -Name "admin.video.publish" -Method "POST" -Url "$BackendBase/api/admin/videos/$videoId/publish"
     Ensure-ApiCodeZero -Name "admin.video.publish" -ApiResponse $publish | Out-Null
 
+    $createdUserName = "smoke_user_" + [DateTime]::Now.ToString("yyyyMMddHHmmss")
+    $userPassword = "123456"
+    $registerBody = @{ username = $createdUserName; password = $userPassword } | ConvertTo-Json -Compress
+    $userRegister = Invoke-Api -Name "user.register" -Method "POST" -Url "$BackendBase/api/auth/register" -Body $registerBody
+    if (Ensure-ApiCodeZero -Name "user.register" -ApiResponse $userRegister) {
+      Add-Result -Name "user.register.username" -Passed ($userRegister.Json.data.username -eq $createdUserName) -Detail "username=$($userRegister.Json.data.username)"
+    }
+
+    $userMe = Invoke-Api -Name "user.me" -Method "GET" -Url "$BackendBase/api/auth/me"
+    Ensure-ApiCodeZero -Name "user.me" -ApiResponse $userMe | Out-Null
+
+    $likeAdd = Invoke-Api -Name "user.like.add" -Method "POST" -Url "$BackendBase/api/videos/$videoId/likes"
+    Ensure-ApiCodeZero -Name "user.like.add" -ApiResponse $likeAdd | Out-Null
+
+    $likeSummary = Invoke-Api -Name "user.like.summary" -Method "GET" -Url "$BackendBase/api/videos/$videoId/likes/summary"
+    Ensure-ApiCodeZero -Name "user.like.summary" -ApiResponse $likeSummary | Out-Null
+
+    $commentCreateBody = @{ content = "smoke comment" } | ConvertTo-Json -Compress
+    $commentCreate = Invoke-Api -Name "user.comment.create" -Method "POST" -Url "$BackendBase/api/videos/$videoId/comments" -Body $commentCreateBody
+    $commentId = $null
+    if (Ensure-ApiCodeZero -Name "user.comment.create" -ApiResponse $commentCreate) {
+      $commentId = $commentCreate.Json.data.id
+      Add-Result -Name "user.comment.create.id" -Passed ($null -ne $commentId) -Detail "id=$commentId"
+    }
+
+    $commentList = Invoke-Api -Name "user.comment.list" -Method "GET" -Url "$BackendBase/api/videos/$videoId/comments?page=1&pageSize=10"
+    Ensure-ApiCodeZero -Name "user.comment.list" -ApiResponse $commentList | Out-Null
+
+    if ($null -ne $commentId) {
+      $commentDelete = Invoke-Api -Name "user.comment.delete" -Method "DELETE" -Url "$BackendBase/api/videos/$videoId/comments/$commentId"
+      Ensure-ApiCodeZero -Name "user.comment.delete" -ApiResponse $commentDelete | Out-Null
+    }
+
+    $favoriteAdd = Invoke-Api -Name "user.favorite.add" -Method "POST" -Url "$BackendBase/api/users/me/favorites/$videoId"
+    Ensure-ApiCodeZero -Name "user.favorite.add" -ApiResponse $favoriteAdd | Out-Null
+
+    $favoriteList = Invoke-Api -Name "user.favorite.list" -Method "GET" -Url "$BackendBase/api/users/me/favorites?page=1&pageSize=10"
+    Ensure-ApiCodeZero -Name "user.favorite.list" -ApiResponse $favoriteList | Out-Null
+
+    $historyUpdateBody = @{ progressSec = 30; durationSecSnapshot = 120 } | ConvertTo-Json -Compress
+    $historyUpdate = Invoke-Api -Name "user.history.update" -Method "PUT" -Url "$BackendBase/api/users/me/history/$videoId/progress" -Body $historyUpdateBody
+    Ensure-ApiCodeZero -Name "user.history.update" -ApiResponse $historyUpdate | Out-Null
+
+    $historyList = Invoke-Api -Name "user.history.list" -Method "GET" -Url "$BackendBase/api/users/me/history?page=1&pageSize=10"
+    Ensure-ApiCodeZero -Name "user.history.list" -ApiResponse $historyList | Out-Null
+
     $playSources = Invoke-Api -Name "public.playSources" -Method "GET" -Url "$BackendBase/api/videos/$videoId/play-sources" -AcceptStatus @(200, 500)
     if ($null -ne $playSources -and $playSources.StatusCode -eq 200) {
       if ($null -ne $playSources.Json -and $null -ne $playSources.Json.code -and [int]$playSources.Json.code -eq 51003) {
@@ -298,6 +345,12 @@ try {
     $recommendHome = Invoke-Api -Name "recommend.home" -Method "GET" -Url "$BackendBase/api/recommend/home?limit=5"
     Ensure-ApiCodeZero -Name "recommend.home" -ApiResponse $recommendHome | Out-Null
 
+    $recommendHot24 = Invoke-Api -Name "recommend.hot.24h" -Method "GET" -Url "$BackendBase/api/recommend/hot?windowType=24h&limit=5"
+    Ensure-ApiCodeZero -Name "recommend.hot.24h" -ApiResponse $recommendHot24 | Out-Null
+
+    $recommendHot7d = Invoke-Api -Name "recommend.hot.7d" -Method "GET" -Url "$BackendBase/api/recommend/hot?windowType=7d&limit=5"
+    Ensure-ApiCodeZero -Name "recommend.hot.7d" -ApiResponse $recommendHot7d | Out-Null
+
     $recommendFeedbackBody = @{ videoId = $videoId; action = "click"; scene = "home" } | ConvertTo-Json -Compress
     $recommendFeedback = Invoke-Api -Name "recommend.feedback" -Method "POST" -Url "$BackendBase/api/recommend/feedback" -Body $recommendFeedbackBody
     Ensure-ApiCodeZero -Name "recommend.feedback" -ApiResponse $recommendFeedback | Out-Null
@@ -317,6 +370,21 @@ try {
 
     $coverList2 = Invoke-Api -Name "cover.tags.list.afterCorrect" -Method "GET" -Url "$BackendBase/api/admin/cover-analysis/videos/$videoId/tags"
     Ensure-ApiCodeZero -Name "cover.tags.list.afterCorrect" -ApiResponse $coverList2 | Out-Null
+
+    $dashFrom = (Get-Date).AddDays(-7).ToString("yyyy-MM-dd")
+    $dashTo = (Get-Date).ToString("yyyy-MM-dd")
+
+    $dashboardOverview = Invoke-Api -Name "dashboard.overview" -Method "GET" -Url "$BackendBase/api/admin/dashboard/overview"
+    Ensure-ApiCodeZero -Name "dashboard.overview" -ApiResponse $dashboardOverview | Out-Null
+
+    $dashboardTraffic = Invoke-Api -Name "dashboard.traffic" -Method "GET" -Url "$BackendBase/api/admin/dashboard/traffic-trend?from=$dashFrom&to=$dashTo"
+    Ensure-ApiCodeZero -Name "dashboard.traffic" -ApiResponse $dashboardTraffic | Out-Null
+
+    $dashboardGrowth = Invoke-Api -Name "dashboard.userGrowth" -Method "GET" -Url "$BackendBase/api/admin/dashboard/user-growth?from=$dashFrom&to=$dashTo"
+    Ensure-ApiCodeZero -Name "dashboard.userGrowth" -ApiResponse $dashboardGrowth | Out-Null
+
+    $dashboardFunnel = Invoke-Api -Name "dashboard.playFunnel" -Method "GET" -Url "$BackendBase/api/admin/dashboard/play-funnel?videoId=$videoId&from=$dashFrom&to=$dashTo"
+    Ensure-ApiCodeZero -Name "dashboard.playFunnel" -ApiResponse $dashboardFunnel | Out-Null
 
     $frontendProxy = Invoke-Api -Name "frontend.proxy.me" -Method "GET" -Url "$FrontendBase/api/admin/auth/me" -AcceptStatus @(200, 404, 502)
     if ($null -ne $frontendProxy -and $frontendProxy.StatusCode -eq 200) {

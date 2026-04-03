@@ -13,6 +13,7 @@ import java.nio.file.Paths;
 public class WebMvcConfig implements WebMvcConfigurer {
 
     private final AdminAuthInterceptor adminAuthInterceptor;
+    private final UserAuthInterceptor userAuthInterceptor;
 
     @Value("${app.cors.allowed-origin:http://localhost:5173}")
     private String corsAllowedOrigin;
@@ -20,8 +21,10 @@ public class WebMvcConfig implements WebMvcConfigurer {
     @Value("${app.storage.local-root:../}")
     private String localStorageRoot;
 
-    public WebMvcConfig(AdminAuthInterceptor adminAuthInterceptor) {
+    public WebMvcConfig(AdminAuthInterceptor adminAuthInterceptor,
+                        UserAuthInterceptor userAuthInterceptor) {
         this.adminAuthInterceptor = adminAuthInterceptor;
+        this.userAuthInterceptor = userAuthInterceptor;
     }
 
     @Override
@@ -32,6 +35,12 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 "/api/admin/auth/login",
                 "/api/admin/auth/me",
                 "/api/admin/auth/logout"
+            );
+
+        registry.addInterceptor(userAuthInterceptor)
+            .addPathPatterns(
+                "/api/users/me/**",
+                "/api/videos/*/likes"
             );
     }
 

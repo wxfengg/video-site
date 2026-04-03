@@ -23,6 +23,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -89,5 +90,23 @@ class VideoControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(40000))
                 .andExpect(jsonPath("$.message").value("仅支持删除已下线视频"));
+    }
+
+    @Test
+    void createExternalVideoShouldReturnDetail() throws Exception {
+        VideoDetailResponse detail = new VideoDetailResponse();
+        detail.setId(9L);
+        detail.setTitle("external-demo");
+        detail.setStatus("ready");
+
+        when(videoService.createExternalVideo(org.mockito.ArgumentMatchers.any())).thenReturn(detail);
+
+        mockMvc.perform(post("/api/admin/videos/external")
+                        .contentType("application/json")
+                        .content("{\"title\":\"external-demo\",\"sourceProtocol\":\"hls\",\"sourceUrl\":\"https://demo.com/master.m3u8\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.id").value(9))
+                .andExpect(jsonPath("$.data.title").value("external-demo"));
     }
 }

@@ -7,6 +7,8 @@
       preload="metadata"
       :src="activeUrl || undefined"
       @play="emit('play')"
+      @pause="emit('pause')"
+      @loadedmetadata="onLoadedMetadata"
       @timeupdate="onTimeUpdate"
       @ended="emit('ended')"
     />
@@ -23,6 +25,7 @@ interface Props {
   mp4720Url?: string | null
   mp41080Url?: string | null
   quality?: string
+  initialProgressSec?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -31,10 +34,12 @@ const props = withDefaults(defineProps<Props>(), {
   mp4720Url: null,
   mp41080Url: null,
   quality: "auto",
+  initialProgressSec: 0,
 })
 
 const emit = defineEmits<{
   play: []
+  pause: []
   ended: []
   progress: [seconds: number]
 }>()
@@ -67,6 +72,20 @@ function onTimeUpdate() {
     return
   }
   emit("progress", Math.floor(videoRef.value.currentTime || 0))
+}
+
+function onLoadedMetadata() {
+  if (!videoRef.value || !props.initialProgressSec || props.initialProgressSec <= 0) {
+    return
+  }
+
+  const target = Math.floor(props.initialProgressSec)
+  if (target <= 0) {
+    return
+  }
+
+  const duration = Number.isFinite(videoRef.value.duration) ? videoRef.value.duration : 0
+  videoRef.value.currentTime = duration > 0 ? Math.min(target, Math.max(0, Math.floor(duration) - 1)) : target
 }
 </script>
 

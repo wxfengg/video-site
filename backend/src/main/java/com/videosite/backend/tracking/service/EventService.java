@@ -1,6 +1,7 @@
 package com.videosite.backend.tracking.service;
 
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
+import com.videosite.backend.common.api.ErrorCode;
 import com.videosite.backend.common.exception.BusinessException;
 import com.videosite.backend.tracking.dto.TrackEventBatchRequest;
 import com.videosite.backend.tracking.dto.TrackEventItemRequest;
@@ -12,6 +13,7 @@ import org.springframework.util.StringUtils;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 
 @Service
 public class EventService {
@@ -32,13 +34,11 @@ public class EventService {
         int stored = 0;
         for (TrackEventItemRequest item : events) {
             if (!StringUtils.hasText(item.getEventType())) {
-                throw new BusinessException(com.videosite.backend.common.api.ErrorCode.BAD_REQUEST, "eventType 不能为空");
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "eventType 不能为空");
             }
 
             long id = resolveEventId(visitorId, item);
-            int affected = jdbcTemplate.update(
-                    "INSERT IGNORE INTO event_log (id, visitor_id, video_id, event_type, event_time, session_id, page_path, ab_experiment_id, ab_variant, progress_sec, extra_json, created_at) " +
-                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+            int affected = storeEvent(
                     id,
                     visitorId,
                     item.getVideoId(),
@@ -57,6 +57,63 @@ public class EventService {
         }
 
         return stored;
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public int collectServerEvent(String visitorId,
+                                  Long videoId,
+                                  String eventType,
+                                  String pagePath,
+                                  String extraJson) {
+        if (!StringUtils.hasText(eventType)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "eventType 不能为空");
+        }
+
+        String safeVisitorId = StringUtils.hasText(visitorId) ? visitorId.trim() : "anonymous";
+        String safeEventType = eventType.trim().toLowerCase(Locale.ROOT);
+
+        int affected = storeEvent(
+                IdWorker.getId(),
+                safeVisitorId,
+                videoId,
+                safeEventType,
+                Timestamp.from(Instant.now()),
+                null,
+                emptyToNull(pagePath),
+                null,
+                null,
+                null,
+                normalizeJson(extraJson, null)
+        );
+        return affected > 0 ? 1 : 0;
+    }
+
+    private int storeEvent(long id,
+                           String visitorId,
+                           Long videoId,
+                           String eventType,
+                           Timestamp eventTime,
+                           String sessionId,
+                           String pagePath,
+                           Long abExperimentId,
+                           String abVariant,
+                           Integer progressSec,
+                           String extraJson) {
+        return jdbcTemplate.update(
+                "INSERT IGNORE INTO event_log (id, visitor_id, video_id, event_type, event_time, session_id, page_path, ab_experiment_id, ab_variant, progress_sec, extra_json, created_at) " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+                id,
+                visitorId,
+                videoId,
+                eventType,
+                eventTime,
+                sessionId,
+                pagePath,
+                abExperimentId,
+                abVariant,
+                progressSec,
+                extraJson
+        );
     }
 
     private long resolveEventId(String visitorId, TrackEventItemRequest item) {
