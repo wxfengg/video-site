@@ -14,10 +14,10 @@
     </div>
     <div class="content">
       <h3 class="title">{{ video.title }}</h3>
-      <p class="meta">
-        <span>状态：{{ video.status }}</span>
-        <span v-if="video.publishAt">发布时间：{{ formatDate(video.publishAt) }}</span>
-      </p>
+      <div class="meta">
+        <span class="status-pill">{{ mapStatus(video.status) }}</span>
+        <span v-if="video.publishAt" class="publish-time">{{ formatDate(video.publishAt) }}</span>
+      </div>
     </div>
   </el-card>
 </template>
@@ -41,54 +41,101 @@ function formatDate(value: string) {
   }).format(new Date(value))
 }
 
+function mapStatus(status: string) {
+  const dict: Record<string, string> = {
+    published: "已发布",
+    ready: "已就绪",
+    transcoding: "转码中",
+    draft: "草稿",
+    offline: "已下线",
+  }
+  return dict[status] || status
+}
+
 void props
 </script>
 
 <style scoped>
 .video-card {
   cursor: pointer;
+  border: 1px solid rgba(221, 229, 250, 0.88);
+  border-radius: 16px;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.video-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(105, 132, 241, 0.4);
+  box-shadow: 0 16px 30px rgba(80, 102, 170, 0.16);
 }
 
 .cover-wrap {
   width: 100%;
   aspect-ratio: 16 / 9;
-  background: #f2f3f5;
+  background: linear-gradient(135deg, #eff3ff 0%, #dfeaff 100%);
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: 12px;
 }
 
 .cover {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform 0.28s ease;
+}
+
+.video-card:hover .cover {
+  transform: scale(1.04);
 }
 
 .placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #909399;
+  color: #7c87a1;
+  font-weight: 600;
+  letter-spacing: 0.05em;
 }
 
 .content {
-  margin-top: 10px;
+  margin-top: 12px;
   min-width: 0;
 }
 
 .title {
   margin: 0;
   font-size: 16px;
-  line-height: 1.4;
+  color: #1a2238;
+  line-height: 1.45;
   text-wrap: balance;
   word-break: break-word;
 }
 
 .meta {
-  margin: 6px 0 0;
-  color: #909399;
+  margin: 10px 0 0;
   font-size: 12px;
+  color: #8090ad;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.status-pill {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  background: rgba(78, 124, 255, 0.12);
+  color: #4f6ed6;
+  font-weight: 600;
+}
+
+.publish-time {
+  white-space: nowrap;
 }
 </style>

@@ -1,22 +1,32 @@
 <template>
   <section class="home">
-    <el-card class="hero">
-      <h1>发现你喜欢的视频</h1>
-      <p>基于当前能力先展示已发布内容，后续可接入混合推荐。</p>
-      <p class="visitor">
-        访客标识：<code>{{ visitorId }}</code>
-      </p>
-    </el-card>
+    <section class="hero" aria-label="推荐引导区">
+      <div class="hero-main">
+        <span class="hero-kicker">智能推荐</span>
+        <h1>发现你喜欢的视频</h1>
+        <p class="hero-desc">基于当前能力优先展示已发布内容，后续将接入混合推荐与个性化排序。</p>
+        <div class="hero-meta">
+          <span class="chip">实时更新</span>
+          <p class="visitor">
+            访客标识：<code>{{ visitorId }}</code>
+          </p>
+        </div>
+      </div>
+      <div class="hero-glow" aria-hidden="true"></div>
+    </section>
 
-    <el-card>
+    <el-card class="list-card" shadow="never">
       <template #header>
         <div class="header-row">
-          <span>视频列表</span>
+          <div>
+            <h2 class="section-title">视频列表</h2>
+            <p class="section-subtitle">按关键词筛选已发布内容</p>
+          </div>
           <el-input
             v-model="keyword"
             placeholder="输入关键字搜索…"
             clearable
-            style="max-width: 280px"
+            class="search-input"
             name="videoKeyword"
             aria-label="视频搜索关键字"
             @keyup.enter="reload"
@@ -85,16 +95,16 @@ async function reload() {
         videos.value = recs
           .map((rec) => byId.get(String(rec.videoId)))
           .filter((item): item is VideoListItem => Boolean(item))
-        total.value = all.total || videos.value.length
+        total.value = Number(all.total || videos.value.length)
       } else {
         const data = await getPublicVideos(page.value, pageSize, keyword.value)
         videos.value = data.records || []
-        total.value = data.total || 0
+        total.value = Number(data.total || 0)
       }
     } else {
       const data = await getPublicVideos(page.value, pageSize, keyword.value)
       videos.value = data.records || []
-      total.value = data.total || 0
+      total.value = Number(data.total || 0)
     }
 
     videos.value.forEach((item, index) => {
@@ -124,40 +134,163 @@ async function openDetail(id: number | string) {
 .home {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 22px;
+}
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-xl);
+  padding: 36px;
+  background: linear-gradient(135deg, #4f78ff 0%, #7456f6 58%, #00a8f5 100%);
+  color: #f8fbff;
+  box-shadow: 0 24px 40px rgba(79, 117, 255, 0.35);
+}
+
+.hero-main {
+  position: relative;
+  z-index: 1;
+}
+
+.hero-kicker {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  border-radius: 999px;
+  padding: 0 12px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(255, 255, 255, 0.18);
 }
 
 .hero h1 {
   margin: 0;
-  font-size: 28px;
+  margin-top: 14px;
+  font-size: clamp(30px, 4vw, 38px);
+  line-height: 1.18;
   text-wrap: balance;
 }
 
-.hero p {
-  margin: 6px 0 0;
-  color: #606266;
+.hero-desc {
+  margin: 12px 0 0;
+  max-width: 760px;
+  color: rgba(245, 250, 255, 0.9);
+}
+
+.hero-meta {
+  margin-top: 18px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.chip {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .visitor {
-  margin-top: 12px;
+  margin: 0;
+  color: rgba(245, 250, 255, 0.95);
+}
+
+.visitor code {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: rgba(8, 16, 45, 0.28);
+  color: #f4f7ff;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+.hero-glow {
+  position: absolute;
+  right: -70px;
+  top: -50px;
+  width: 240px;
+  height: 240px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.3) 0%, transparent 64%);
 }
 
 .header-row {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 12px;
+  gap: 14px;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.section-subtitle {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.search-input {
+  max-width: 300px;
+}
+
+.list-card {
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-soft);
+  border-radius: var(--radius-lg);
+}
+
+.list-card :deep(.el-card__header) {
+  border-bottom-color: rgba(224, 231, 255, 0.75);
+}
+
+.list-card :deep(.el-card__body) {
+  padding-top: 18px;
+}
+
+.search-input :deep(.el-input__wrapper) {
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px rgba(136, 153, 190, 0.24);
 }
 
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 14px;
+  gap: 16px;
 }
 
 .pager-wrap {
   display: flex;
   justify-content: flex-end;
-  margin-top: 16px;
+  margin-top: 20px;
+}
+
+@media (max-width: 860px) {
+  .hero {
+    padding: 24px;
+  }
+
+  .hero-glow {
+    display: none;
+  }
+
+  .header-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .search-input {
+    max-width: 100%;
+  }
 }
 </style>
