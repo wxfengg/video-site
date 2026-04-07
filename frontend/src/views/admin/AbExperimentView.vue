@@ -65,9 +65,6 @@
       <el-form-item label="实验名称">
         <el-input v-model="form.name" />
       </el-form-item>
-      <el-form-item label="场景">
-        <el-input v-model="form.scene" placeholder="例如 home_cover" />
-      </el-form-item>
       <el-form-item label="目标视频" required>
         <el-select
           v-model="form.targetVideoId"
@@ -79,13 +76,10 @@
           <el-option v-for="item in videoOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </el-form-item>
-      <el-form-item label="主指标">
-        <el-input v-model="form.metricPrimary" placeholder="ctr" />
-      </el-form-item>
 
       <el-divider>变体配置</el-divider>
-      <div v-for="(variant, index) in form.variants" :key="index" class="variant-row">
-        <el-input v-model="variant.variantCode" placeholder="变体编码（A/B）" style="width: 120px" />
+      <div v-for="variant in form.variants" :key="variant.variantCode" class="variant-row">
+        <el-tag class="variant-code-tag" type="info">变体 {{ variant.variantCode }}</el-tag>
         <div class="variant-cover-editor">
           <ImageUploadSelector
             v-model="variant.coverFile"
@@ -112,11 +106,7 @@
           </div>
         </div>
         <el-input-number v-model="variant.trafficRatio" :min="1" :max="100" style="width: 120px" />
-        <el-button text type="danger" @click="removeVariant(index)">删除</el-button>
       </div>
-      <el-form-item>
-        <el-button @click="addVariant">添加变体</el-button>
-      </el-form-item>
     </el-form>
 
     <template #footer>
@@ -151,6 +141,10 @@ interface AbVariantFormItem {
   coverStatus: "idle" | "uploading" | "success" | "error"
 }
 
+const FIXED_SCENE = "home_cover"
+const FIXED_METRIC_PRIMARY = "ctr"
+const FIXED_VARIANT_CODES = ["A", "B"] as const
+
 function buildVariantFormItem(variantCode: string, coverUrl: string, trafficRatio: number): AbVariantFormItem {
   return {
     variantCode,
@@ -163,7 +157,17 @@ function buildVariantFormItem(variantCode: string, coverUrl: string, trafficRati
 }
 
 function defaultVariants() {
-  return [buildVariantFormItem("A", "", 50), buildVariantFormItem("B", "", 50)]
+  return FIXED_VARIANT_CODES.map((code) => buildVariantFormItem(code, "", 50))
+}
+
+function normalizeFixedVariants(source: Array<{ variantCode: string; coverUrl?: string; trafficRatio: number }>) {
+  const variantMap = new Map(source.map((item) => [String(item.variantCode).toUpperCase(), item]))
+  return FIXED_VARIANT_CODES.map((code) => {
+    const current = variantMap.get(code)
+    const ratio = Number(current?.trafficRatio)
+    const normalizedRatio = Number.isFinite(ratio) && ratio > 0 ? ratio : 50
+    return buildVariantFormItem(code, current?.coverUrl || "", normalizedRatio)
+  })
 }
 
 const loading = ref(false)
@@ -188,9 +192,7 @@ const videoTitleMap = computed(() => {
 
 const form = reactive({
   name: "",
-  scene: "home_cover",
   targetVideoId: "",
-  metricPrimary: "ctr",
   variants: defaultVariants() as AbVariantFormItem[],
 })
 
@@ -219,9 +221,7 @@ function onPageChange(nextPage: number) {
 
 function resetForm() {
   form.name = ""
-  form.scene = "home_cover"
   form.targetVideoId = videoOptions.value[0]?.value || ""
-  form.metricPrimary = "ctr"
   form.variants = defaultVariants()
 }
 
@@ -234,19 +234,9 @@ function openCreate() {
 function openEdit(item: AbExperiment) {
   editingId.value = item.id
   form.name = item.name
-  form.scene = item.scene
   form.targetVideoId = String(item.targetVideoId)
-  form.metricPrimary = item.metricPrimary
-  form.variants = item.variants.map((v) => buildVariantFormItem(v.variantCode, v.coverUrl || "", v.trafficRatio))
+  form.variants = normalizeFixedVariants(item.variants)
   dialogVisible.value = true
-}
-
-function addVariant() {
-  form.variants.push(buildVariantFormItem(`V${form.variants.length + 1}`, "", 10))
-}
-
-function removeVariant(index: number) {
-  form.variants.splice(index, 1)
 }
 
 async function submit() {
@@ -264,8 +254,8 @@ async function submit() {
     return
   }
 
-  if (!editingId.value && form.variants.some((item) => !item.coverUrl || !item.coverUrl.trim())) {
-    ElMessage.warning("新建实验时每个变体都必须上传封面图")
+  if (form.variants.some((item) => !item.coverUrl || !item.coverUrl.trim())) {
+    ElMessage.warning("A/B 两个变体都必须上传封面图")
     return
   }
 
@@ -284,9 +274,9 @@ async function submit() {
   try {
     const payload = {
       name: form.name,
-      scene: form.scene,
+      scene: FIXED_SCENE,
       targetVideoId: form.targetVideoId,
-      metricPrimary: form.metricPrimary,
+      metricPrimary: FIXED_METRIC_PRIMARY,
       variants: form.variants.map((item) => ({
         variantCode: item.variantCode,
         coverUrl: item.coverUrl,
@@ -454,6 +444,10 @@ function resolveVideoTitle(videoId: number | string) {
   flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 10px;
+}
+
+.variant-code-tag {
+  margin-top: 8px;
 }
 
 .variant-cover-editor {

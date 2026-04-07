@@ -94,6 +94,19 @@ class AbExperimentServiceTest {
         verifyNoInteractions(jdbcTemplate);
     }
 
+    @Test
+    void createExperimentShouldRejectWhenVariantCodeIsNotFixedAB() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        AbExperimentService service = createService(jdbcTemplate);
+
+        AbExperimentSaveRequest request = buildCreateRequest("https://cdn.example.com/a.jpg", "https://cdn.example.com/b.jpg");
+        request.getVariants().get(1).setVariantCode("C");
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> service.createExperiment(request));
+        assertEquals(ErrorCode.BAD_REQUEST, ex.getErrorCode());
+        verifyNoInteractions(jdbcTemplate);
+    }
+
     private AbExperimentSaveRequest buildCreateRequest(String coverA, String coverB) {
         AbExperimentSaveRequest request = new AbExperimentSaveRequest();
         request.setName("首页封面对照实验");

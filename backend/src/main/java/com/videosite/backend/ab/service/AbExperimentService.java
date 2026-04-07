@@ -31,6 +31,9 @@ import java.util.Set;
 @Service
 public class AbExperimentService {
 
+    private static final String FIXED_SCENE = "home_cover";
+    private static final String FIXED_METRIC_PRIMARY = "ctr";
+
     private static final long MAX_COVER_SIZE_BYTES = 5L * 1024 * 1024;
     private static final Set<String> ALLOWED_COVER_MIME_TYPES = Set.of(
             "image/jpeg",
@@ -73,6 +76,7 @@ public class AbExperimentService {
 
     @Transactional(rollbackFor = Exception.class)
     public AbExperimentResponse createExperiment(AbExperimentSaveRequest request) {
+        validateFixedVariantSchema(request.getVariants());
         validateRatios(request.getVariants());
         validateRequiredVariantCovers(request.getVariants());
 
@@ -81,9 +85,9 @@ public class AbExperimentService {
                 "INSERT INTO ab_experiment (id, name, scene, target_video_id, status, metric_primary, start_at, end_at, created_at, updated_at) VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, NOW(), NOW())",
                 experimentId,
                 request.getName(),
-                request.getScene(),
+                FIXED_SCENE,
                 request.getTargetVideoId(),
-                request.getMetricPrimary(),
+                FIXED_METRIC_PRIMARY,
                 parseTimestamp(request.getStartAt()),
                 parseTimestamp(request.getEndAt())
         );
@@ -95,14 +99,16 @@ public class AbExperimentService {
     @Transactional(rollbackFor = Exception.class)
     public AbExperimentResponse updateExperiment(Long experimentId, AbExperimentSaveRequest request) {
         ensureExperimentExists(experimentId);
+        validateFixedVariantSchema(request.getVariants());
         validateRatios(request.getVariants());
+        validateRequiredVariantCovers(request.getVariants());
 
         jdbcTemplate.update(
                 "UPDATE ab_experiment SET name = ?, scene = ?, target_video_id = ?, metric_primary = ?, start_at = ?, end_at = ?, updated_at = NOW() WHERE id = ?",
                 request.getName(),
-                request.getScene(),
+            FIXED_SCENE,
                 request.getTargetVideoId(),
-                request.getMetricPrimary(),
+            FIXED_METRIC_PRIMARY,
                 parseTimestamp(request.getStartAt()),
                 parseTimestamp(request.getEndAt()),
                 experimentId
@@ -299,10 +305,42 @@ public class AbExperimentService {
         }
     }
 
+    private void validateFixedVariantSchema(List<AbVariantRequest> variants) {
+        if (variants == null || variants.size() != 2) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "仅支持固定 A/B 两个变体");
+        }
+
+        boolean hasA = false;
+        boolean hasB = false;
+        for (AbVariantRequest variant : variants) {
+            if (variant == null || !StringUtils.hasText(variant.getVariantCode())) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "变体编码仅支持 A/B");
+            }
+
+            String normalizedCode = variant.getVariantCode().trim().toUpperCase();
+            if ("A".equals(normalizedCode)) {
+                hasA = true;
+                variant.setVariantCode("A");
+                continue;
+            }
+            if ("B".equals(normalizedCode)) {
+                hasB = true;
+                variant.setVariantCode("B");
+                continue;
+            }
+
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "变体编码仅支持 A/B");
+        }
+
+        if (!hasA || !hasB) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "仅支持固定 A/B 两个变体");
+        }
+    }
+
     private void validateRequiredVariantCovers(List<AbVariantRequest> variants) {
         for (AbVariantRequest variant : variants) {
             if (!StringUtils.hasText(variant.getCoverUrl())) {
-                throw new BusinessException(ErrorCode.BAD_REQUEST, "新建实验时每个变体都必须配置封面图");
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "A/B 两个变体都必须配置封面图");
             }
         }
     }
