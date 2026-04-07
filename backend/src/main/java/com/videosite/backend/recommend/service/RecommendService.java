@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.videosite.backend.common.auth.AuthConstants;
 import com.videosite.backend.recommend.dto.RecommendFeedbackRequest;
 import com.videosite.backend.recommend.dto.RecommendationItemResponse;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,36 +40,42 @@ public class RecommendService {
     }
 
     public List<RecommendationItemResponse> listHomeRecommendations(String visitorId, int limit) {
-        String latestVersion = latestVersionHour(visitorId, "home");
-        if (!StringUtils.hasText(latestVersion)) {
-            return fallbackByHot(limit);
-        }
+        int safeLimit = Math.max(1, Math.min(limit, 50));
 
-        List<RecommendationItemResponse> rows = jdbcTemplate.query(
-            "SELECT rr.video_id, rr.rank_index, rr.score_total, rr.score_content, rr.score_cf, rr.score_hot " +
-                "FROM recommendation_result rr " +
-                "JOIN video v ON v.id = rr.video_id " +
-                "WHERE rr.visitor_id = ? AND rr.scene = 'home' AND rr.version_hour = ? AND v.status = 'published' " +
-                "ORDER BY rr.rank_index ASC LIMIT ?",
-                (rs, rowNum) -> {
-                    RecommendationItemResponse item = new RecommendationItemResponse();
-                    item.setVideoId(rs.getLong("video_id"));
-                    item.setRankIndex(rs.getInt("rank_index"));
-                    item.setScoreTotal(rs.getDouble("score_total"));
-                    item.setScoreContent(rs.getObject("score_content") == null ? null : rs.getDouble("score_content"));
-                    item.setScoreCf(rs.getObject("score_cf") == null ? null : rs.getDouble("score_cf"));
-                    item.setScoreHot(rs.getObject("score_hot") == null ? null : rs.getDouble("score_hot"));
-                    return item;
-                },
-                visitorId,
-                latestVersion,
-                limit
-        );
+        try {
+            String latestVersion = latestVersionHour(visitorId, "home");
+            if (!StringUtils.hasText(latestVersion)) {
+                return fallbackByHot(safeLimit);
+            }
 
-        if (rows.isEmpty()) {
-            return fallbackByHot(limit);
+            List<RecommendationItemResponse> rows = jdbcTemplate.query(
+                "SELECT rr.video_id, rr.rank_index, rr.score_total, rr.score_content, rr.score_cf, rr.score_hot " +
+                    "FROM recommendation_result rr " +
+                    "JOIN video v ON v.id = rr.video_id " +
+                    "WHERE rr.visitor_id = ? AND rr.scene = 'home' AND rr.version_hour = ? AND v.status = 'published' " +
+                    "ORDER BY rr.rank_index ASC LIMIT ?",
+                    (rs, rowNum) -> {
+                        RecommendationItemResponse item = new RecommendationItemResponse();
+                        item.setVideoId(rs.getLong("video_id"));
+                        item.setRankIndex(rs.getInt("rank_index"));
+                        item.setScoreTotal(rs.getDouble("score_total"));
+                        item.setScoreContent(rs.getObject("score_content") == null ? null : rs.getDouble("score_content"));
+                        item.setScoreCf(rs.getObject("score_cf") == null ? null : rs.getDouble("score_cf"));
+                        item.setScoreHot(rs.getObject("score_hot") == null ? null : rs.getDouble("score_hot"));
+                        return item;
+                    },
+                    visitorId,
+                    latestVersion,
+                    safeLimit
+            );
+
+            if (rows.isEmpty()) {
+                return fallbackByHot(safeLimit);
+            }
+            return rows;
+        } catch (DataAccessException ex) {
+            return fallbackByPublished(safeLimit);
         }
-        return rows;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -192,37 +199,41 @@ public class RecommendService {
     }
 
     private Map<Long, Double> loadHotScoresFromSnapshot(List<Long> candidates, String windowType) {
-        List<Timestamp> bucketRows = jdbcTemplate.query(
-                "SELECT bucket_time FROM video_hot_rank_5m WHERE window_type = ? ORDER BY bucket_time DESC LIMIT 1",
-                (rs, rowNum) -> rs.getTimestamp("bucket_time"),
-                windowType
-        );
-        if (bucketRows.isEmpty()) {
-            return Map.of();
-        }
-
-        Timestamp latestBucketTime = bucketRows.get(0);
-        Set<Long> candidateSet = new HashSet<>(candidates);
-
-        List<HotScoreRow> rows = jdbcTemplate.query(
-                "SELECT video_id, hot_score FROM video_hot_rank_5m WHERE window_type = ? AND bucket_time = ?",
-                (rs, rowNum) -> new HotScoreRow(rs.getLong("video_id"), rs.getBigDecimal("hot_score")),
-                windowType,
-                latestBucketTime
-        );
-
-        Map<Long, Double> raw = new HashMap<>();
-        for (HotScoreRow row : rows) {
-            if (candidateSet.contains(row.videoId)) {
-                raw.put(row.videoId, row.hotScore);
+        try {
+            List<Timestamp> bucketRows = jdbcTemplate.query(
+                    "SELECT bucket_time FROM video_hot_rank_5m WHERE window_type = ? ORDER BY bucket_time DESC LIMIT 1",
+                    (rs, rowNum) -> rs.getTimestamp("bucket_time"),
+                    windowType
+            );
+            if (bucketRows.isEmpty()) {
+                return Map.of();
             }
-        }
 
-        if (raw.isEmpty()) {
+            Timestamp latestBucketTime = bucketRows.get(0);
+            Set<Long> candidateSet = new HashSet<>(candidates);
+
+            List<HotScoreRow> rows = jdbcTemplate.query(
+                    "SELECT video_id, hot_score FROM video_hot_rank_5m WHERE window_type = ? AND bucket_time = ?",
+                    (rs, rowNum) -> new HotScoreRow(rs.getLong("video_id"), rs.getBigDecimal("hot_score")),
+                    windowType,
+                    latestBucketTime
+            );
+
+            Map<Long, Double> raw = new HashMap<>();
+            for (HotScoreRow row : rows) {
+                if (candidateSet.contains(row.videoId)) {
+                    raw.put(row.videoId, row.hotScore);
+                }
+            }
+
+            if (raw.isEmpty()) {
+                return Map.of();
+            }
+
+            return normalizeRawScores(candidates, raw);
+        } catch (DataAccessException ex) {
             return Map.of();
         }
-
-        return normalizeRawScores(candidates, raw);
     }
 
     private Map<Long, Double> loadHotScoresFromEventLog(List<Long> candidates) {
@@ -330,44 +341,52 @@ public class RecommendService {
     }
 
     private List<RecommendationItemResponse> fallbackByHot(int limit) {
-        List<Timestamp> bucketRows = jdbcTemplate.query(
-                "SELECT bucket_time FROM video_hot_rank_5m WHERE window_type = ? ORDER BY bucket_time DESC LIMIT 1",
-                (rs, rowNum) -> rs.getTimestamp("bucket_time"),
-                HOT_RANK_WINDOW_FOR_FALLBACK
-        );
-
-        if (!bucketRows.isEmpty()) {
-            Timestamp latestBucketTime = bucketRows.get(0);
-            List<RecommendationItemResponse> hotRows = jdbcTemplate.query(
-                    "SELECT r.video_id, r.rank_index, r.hot_score " +
-                            "FROM video_hot_rank_5m r " +
-                            "JOIN video v ON v.id = r.video_id " +
-                            "WHERE r.window_type = ? AND r.bucket_time = ? AND v.status = 'published' " +
-                            "ORDER BY r.rank_index ASC LIMIT ?",
-                    (rs, rowNum) -> {
-                        RecommendationItemResponse item = new RecommendationItemResponse();
-                        item.setVideoId(rs.getLong("video_id"));
-                        item.setRankIndex(rs.getInt("rank_index"));
-
-                        BigDecimal hotScore = rs.getBigDecimal("hot_score");
-                        double safeHotScore = hotScore == null ? 0d : hotScore.doubleValue();
-
-                        item.setScoreTotal(safeHotScore);
-                        item.setScoreContent(0d);
-                        item.setScoreCf(0d);
-                        item.setScoreHot(safeHotScore);
-                        return item;
-                    },
-                    HOT_RANK_WINDOW_FOR_FALLBACK,
-                    latestBucketTime,
-                    limit
+        try {
+            List<Timestamp> bucketRows = jdbcTemplate.query(
+                    "SELECT bucket_time FROM video_hot_rank_5m WHERE window_type = ? ORDER BY bucket_time DESC LIMIT 1",
+                    (rs, rowNum) -> rs.getTimestamp("bucket_time"),
+                    HOT_RANK_WINDOW_FOR_FALLBACK
             );
 
-            if (!hotRows.isEmpty()) {
-                return hotRows;
+            if (!bucketRows.isEmpty()) {
+                Timestamp latestBucketTime = bucketRows.get(0);
+                List<RecommendationItemResponse> hotRows = jdbcTemplate.query(
+                        "SELECT r.video_id, r.rank_index, r.hot_score " +
+                                "FROM video_hot_rank_5m r " +
+                                "JOIN video v ON v.id = r.video_id " +
+                                "WHERE r.window_type = ? AND r.bucket_time = ? AND v.status = 'published' " +
+                                "ORDER BY r.rank_index ASC LIMIT ?",
+                        (rs, rowNum) -> {
+                            RecommendationItemResponse item = new RecommendationItemResponse();
+                            item.setVideoId(rs.getLong("video_id"));
+                            item.setRankIndex(rs.getInt("rank_index"));
+
+                            BigDecimal hotScore = rs.getBigDecimal("hot_score");
+                            double safeHotScore = hotScore == null ? 0d : hotScore.doubleValue();
+
+                            item.setScoreTotal(safeHotScore);
+                            item.setScoreContent(0d);
+                            item.setScoreCf(0d);
+                            item.setScoreHot(safeHotScore);
+                            return item;
+                        },
+                        HOT_RANK_WINDOW_FOR_FALLBACK,
+                        latestBucketTime,
+                        limit
+                );
+
+                if (!hotRows.isEmpty()) {
+                    return hotRows;
+                }
             }
+        } catch (DataAccessException ex) {
+            return fallbackByPublished(limit);
         }
 
+        return fallbackByPublished(limit);
+    }
+
+    private List<RecommendationItemResponse> fallbackByPublished(int limit) {
         return jdbcTemplate.query(
                 "SELECT v.id AS video_id FROM video v WHERE v.status = 'published' ORDER BY v.publish_at DESC LIMIT ?",
                 (rs, rowNum) -> {

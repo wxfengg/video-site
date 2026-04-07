@@ -2,6 +2,7 @@ package com.videosite.backend.recommend.service;
 
 import com.videosite.backend.recommend.dto.RecommendationItemResponse;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
@@ -150,6 +151,44 @@ class RecommendServiceTest {
         assertEquals(999L, result.get(0).getVideoId());
         assertEquals(0d, result.get(0).getScoreHot());
     }
+
+        @Test
+        void listHomeRecommendationsShouldFallbackToPublishTimeWhenHotRankTableUnavailable() {
+                JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+                RecommendService service = new RecommendService(jdbcTemplate);
+
+                RecommendationItemResponse publishFallback = new RecommendationItemResponse();
+                publishFallback.setVideoId(1000L);
+                publishFallback.setRankIndex(1);
+                publishFallback.setScoreTotal(0d);
+                publishFallback.setScoreContent(0d);
+                publishFallback.setScoreCf(0d);
+                publishFallback.setScoreHot(0d);
+
+                when(jdbcTemplate.query(
+                                eq("SELECT version_hour FROM recommendation_result WHERE visitor_id = ? AND scene = ? ORDER BY created_at DESC LIMIT 1"),
+                                any(RowMapper.class),
+                                eq("visitorE"),
+                                eq("home")
+                )).thenReturn(List.of());
+
+                when(jdbcTemplate.query(
+                                eq("SELECT bucket_time FROM video_hot_rank_5m WHERE window_type = ? ORDER BY bucket_time DESC LIMIT 1"),
+                                any(RowMapper.class),
+                                eq("24h")
+                )).thenThrow(new DataAccessResourceFailureException("table missing"));
+
+                when(jdbcTemplate.query(
+                                eq("SELECT v.id AS video_id FROM video v WHERE v.status = 'published' ORDER BY v.publish_at DESC LIMIT ?"),
+                                any(RowMapper.class),
+                                eq(8)
+                )).thenReturn(List.of(publishFallback));
+
+                List<RecommendationItemResponse> result = service.listHomeRecommendations("visitorE", 8);
+                assertEquals(1, result.size());
+                assertEquals(1000L, result.get(0).getVideoId());
+                assertEquals(0d, result.get(0).getScoreTotal());
+        }
 
         @Test
         void listHomeRecommendationsShouldKeepRankingOrderForExplainability() {

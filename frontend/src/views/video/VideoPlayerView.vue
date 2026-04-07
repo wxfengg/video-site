@@ -135,8 +135,9 @@ const detail = ref<VideoDetail | null>(null)
 const sources = ref<VideoPlaySources | null>(null)
 const selectedQuality = ref("auto")
 const sentProgressSec = ref(new Set<number>())
+const latestObservedProgressSec = ref(0)
 const userLoggedIn = ref(false)
-const currentUserId = ref<number | null>(null)
+const currentUserId = ref<string | null>(null)
 const resumeProgressSec = ref(0)
 const lastSyncedProgressSec = ref(-1)
 const likeSummary = ref<VideoLikeSummary | null>(null)
@@ -156,13 +157,17 @@ const qualityOptions = [
   { label: "360P", value: "360" },
 ]
 
-const videoId = computed(() => String(route.params.id || ""))
-const numericVideoId = computed(() => {
-  const value = Number(videoId.value)
-  return Number.isSafeInteger(value) ? value : null
+const videoId = computed(() => {
+  const raw = String(route.params.id || "").trim()
+  return raw.length > 0 ? raw : null
 })
 
 onMounted(async () => {
+  if (videoId.value === null) {
+    ElMessage.error("视频ID无效")
+    return
+  }
+
   loading.value = true
   try {
     const [detailData, sourceData] = await Promise.all([
@@ -174,15 +179,14 @@ onMounted(async () => {
 
     const session = await fetchUserSession()
     userLoggedIn.value = session.loggedIn
-    currentUserId.value = session.userId ? Number(session.userId) : null
-    if (session.loggedIn && numericVideoId.value !== null) {
-      const resume = await getMyVideoProgress(numericVideoId.value)
+    currentUserId.value = session.userId ? String(session.userId) : null
+    if (session.loggedIn) {
+      const resume = await getMyVideoProgress(videoId.value)
       resumeProgressSec.value = Math.max(0, Number(resume.progressSec || 0))
+      latestObservedProgressSec.value = resumeProgressSec.value
     }
 
-    if (numericVideoId.value !== null) {
-      await Promise.all([loadLikeSummary(), loadComments()])
-    }
+    await Promise.all([loadLikeSummary(), loadComments()])
   } catch (_err) {
     ElMessage.error("加载播放页失败，请稍后再试")
   } finally {
@@ -191,69 +195,110 @@ onMounted(async () => {
 })
 
 function onPlay() {
-  if (numericVideoId.value === null) {
+  if (videoId.value === null) {
     return
   }
-  trackPlay(numericVideoId.value, { quality: selectedQuality.value })
+  trackPlay(videoId.value, { quality: selectedQuality.value })
 }
 
 function onProgress(seconds: number) {
-  if (numericVideoId.value === null || seconds < 5 || seconds % 5 !== 0) {
-    return
-  }
-
-  if (sentProgressSec.value.has(seconds)) {
-    return
-  }
-
-  sentProgressSec.value.add(seconds)
-  trackProgress(numericVideoId.value, seconds, { quality: selectedQuality.value })
-  void syncProgress(seconds)
-}
-
-function onEnded() {
-  if (numericVideoId.value === null) {
-    return
-  }
-  trackComplete(numericVideoId.value, { quality: selectedQuality.value })
-  if (detail.value?.durationSec) {
-    void syncProgress(detail.value.durationSec)
-  }
-}
-
-function onPause() {
-  if (numericVideoId.value === null || sentProgressSec.value.size === 0) {
-    return
-  }
-  const latest = Math.max(...Array.from(sentProgressSec.value.values()))
-  void syncProgress(latest)
-}
-
-async function syncProgress(seconds: number) {
-  if (!userLoggedIn.value || numericVideoId.value === null) {
+  if (videoId.value === null) {
     return
   }
 
   const safeSeconds = Math.max(0, Math.floor(seconds))
-  if (safeSeconds === lastSyncedProgressSec.value) {
+  latestObservedProgressSec.value = Math.max(latestObservedProgressSec.value, safeSeconds)
+
+  if (safeSeconds < 5 || safeSeconds % 5 !== 0) {
+    return
+  }
+
+  if (sentProgressSec.value.has(safeSeconds)) {
+    return
+  }
+
+  sentProgressSec.value.add(safeSeconds)
+  trackProgress(videoId.value, safeSeconds, { quality: selectedQuality.value })
+  void syncProgress(safeSeconds, { durationSecSnapshot: detail.value?.durationSec || undefined })
+}
+
+function onEnded(payload: { currentTimeSec: number; durationSec: number | null }) {
+  if (videoId.value === null) {
+    return
+  }
+
+  trackComplete(videoId.value, { quality: selectedQuality.value })
+
+  const fromPayloadTime = Math.max(0, Math.floor(payload?.currentTimeSec || 0))
+  const fromPayloadDuration = Math.max(0, Math.floor(payload?.durationSec || 0))
+  const fromDetailDuration = Math.max(0, Math.floor(detail.value?.durationSec || 0))
+
+  const finalProgressSec = Math.max(
+    latestObservedProgressSec.value,
+    fromPayloadTime,
+    fromPayloadDuration,
+    fromDetailDuration,
+  )
+  if (finalProgressSec <= 0) {
+    return
+  }
+
+  latestObservedProgressSec.value = Math.max(latestObservedProgressSec.value, finalProgressSec)
+
+  const durationSnapshot = Math.max(fromPayloadDuration, fromDetailDuration, finalProgressSec)
+  void syncProgress(finalProgressSec, { durationSecSnapshot: durationSnapshot, force: true })
+}
+
+function onPause() {
+  if (videoId.value === null) {
+    return
+  }
+
+  const latestFromTracked = sentProgressSec.value.size > 0 ? Math.max(...Array.from(sentProgressSec.value.values())) : 0
+  const latest = Math.max(latestObservedProgressSec.value, latestFromTracked, resumeProgressSec.value)
+  if (latest <= 0) {
+    return
+  }
+
+  void syncProgress(latest, { durationSecSnapshot: detail.value?.durationSec || undefined })
+}
+
+type SyncProgressOptions = {
+  durationSecSnapshot?: number
+  force?: boolean
+}
+
+async function syncProgress(seconds: number, options: SyncProgressOptions = {}) {
+  if (!userLoggedIn.value || videoId.value === null) {
+    return
+  }
+
+  const safeSeconds = Math.max(0, Math.floor(seconds))
+  const safeDurationSnapshot =
+    options.durationSecSnapshot && options.durationSecSnapshot > 0
+      ? Math.max(1, Math.floor(options.durationSecSnapshot))
+      : undefined
+
+  if (!options.force && safeSeconds === lastSyncedProgressSec.value) {
     return
   }
 
   try {
-    await updateMyVideoProgress(numericVideoId.value, safeSeconds, detail.value?.durationSec || undefined)
+    await updateMyVideoProgress(videoId.value, safeSeconds, safeDurationSnapshot)
     lastSyncedProgressSec.value = safeSeconds
+    latestObservedProgressSec.value = Math.max(latestObservedProgressSec.value, safeSeconds)
   } catch (_err) {
     // 进度回写失败不阻断播放
   }
 }
 
 async function onFavorite() {
-  if (numericVideoId.value === null) {
+  if (videoId.value === null) {
     return
   }
 
   try {
-    await addFavorite(numericVideoId.value)
+    await addFavorite(videoId.value)
     ElMessage.success("已加入收藏")
   } catch (_err) {
     ElMessage.error("加入收藏失败，请先登录")
@@ -261,19 +306,19 @@ async function onFavorite() {
 }
 
 async function loadLikeSummary() {
-  if (numericVideoId.value === null) {
+  if (videoId.value === null) {
     return
   }
 
   try {
-    likeSummary.value = await getVideoLikeSummary(numericVideoId.value)
+    likeSummary.value = await getVideoLikeSummary(videoId.value)
   } catch (_err) {
     likeSummary.value = null
   }
 }
 
 async function onToggleLike() {
-  if (!userLoggedIn.value || numericVideoId.value === null) {
+  if (!userLoggedIn.value || videoId.value === null) {
     ElMessage.warning("请先登录后再点赞")
     return
   }
@@ -281,10 +326,10 @@ async function onToggleLike() {
   likeSubmitting.value = true
   try {
     if (likeSummary.value?.likedByCurrentUser) {
-      await removeVideoLike(numericVideoId.value)
+      await removeVideoLike(videoId.value)
       ElMessage.success("已取消点赞")
     } else {
-      await addVideoLike(numericVideoId.value)
+      await addVideoLike(videoId.value)
       ElMessage.success("点赞成功")
     }
     await loadLikeSummary()
@@ -296,13 +341,13 @@ async function onToggleLike() {
 }
 
 async function loadComments() {
-  if (numericVideoId.value === null) {
+  if (videoId.value === null) {
     return
   }
 
   commentsLoading.value = true
   try {
-    const result = await getVideoComments(numericVideoId.value, commentsPage.value, commentsPageSize)
+    const result = await getVideoComments(videoId.value, commentsPage.value, commentsPageSize)
     comments.value = result.records || []
     commentsTotal.value = Number(result.total || 0)
   } catch (_err) {
@@ -324,7 +369,7 @@ async function onCommentsPageChange(nextPage: number) {
 }
 
 async function onSubmitComment() {
-  if (!userLoggedIn.value || numericVideoId.value === null) {
+  if (!userLoggedIn.value || videoId.value === null) {
     ElMessage.warning("请先登录")
     return
   }
@@ -337,7 +382,7 @@ async function onSubmitComment() {
 
   commentSubmitting.value = true
   try {
-    await createVideoComment(numericVideoId.value, content)
+    await createVideoComment(videoId.value, content)
     commentContent.value = ""
     ElMessage.success("评论成功")
     await reloadComments()
@@ -349,12 +394,12 @@ async function onSubmitComment() {
 }
 
 async function onDeleteComment(commentId: number | string) {
-  if (!userLoggedIn.value || numericVideoId.value === null) {
+  if (!userLoggedIn.value || videoId.value === null) {
     return
   }
 
   try {
-    await deleteVideoComment(numericVideoId.value, commentId)
+    await deleteVideoComment(videoId.value, commentId)
     ElMessage.success("评论已删除")
     await loadComments()
   } catch (_err) {

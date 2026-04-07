@@ -105,7 +105,6 @@ import {
   getHomeRecommendations,
   getPublicVideos,
   sendRecommendFeedback,
-  type RecommendationItem,
   type VideoHotRankItem,
   type VideoListItem,
 } from "../../apis/video"
@@ -135,22 +134,33 @@ watch(hotWindowType, () => {
 async function reload() {
   loading.value = true
   try {
-    if (!keyword.value) {
-      const recs: RecommendationItem[] = await getHomeRecommendations(pageSize)
+    const trimmedKeyword = keyword.value.trim()
+
+    if (!trimmedKeyword && page.value === 1) {
+      const preloadSize = Math.max(200, pageSize * 10)
+      const [recs, all] = await Promise.all([
+        getHomeRecommendations(Math.max(pageSize, 20)),
+        getPublicVideos(1, preloadSize, ""),
+      ])
+
+      const allRecords = all.records || []
       if (recs.length > 0) {
-        const all = await getPublicVideos(1, 100, "")
-        const byId = new Map<string, VideoListItem>((all.records || []).map((item) => [String(item.id), item]))
-        videos.value = recs
+        const byId = new Map<string, VideoListItem>(allRecords.map((item) => [String(item.id), item]))
+        const recommendedRecords = recs
           .map((rec) => byId.get(String(rec.videoId)))
           .filter((item): item is VideoListItem => Boolean(item))
-        total.value = Number(all.total || videos.value.length)
+
+        const selectedIds = new Set(recommendedRecords.map((item) => String(item.id)))
+        const fallbackRecords = allRecords.filter((item) => !selectedIds.has(String(item.id)))
+
+        videos.value = [...recommendedRecords, ...fallbackRecords].slice(0, pageSize)
       } else {
-        const data = await getPublicVideos(page.value, pageSize, keyword.value)
-        videos.value = data.records || []
-        total.value = Number(data.total || 0)
+        videos.value = allRecords.slice(0, pageSize)
       }
+
+      total.value = Number(all.total || videos.value.length)
     } else {
-      const data = await getPublicVideos(page.value, pageSize, keyword.value)
+      const data = await getPublicVideos(page.value, pageSize, trimmedKeyword)
       videos.value = data.records || []
       total.value = Number(data.total || 0)
     }

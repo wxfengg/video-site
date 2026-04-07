@@ -129,6 +129,11 @@ const externalForm = reactive({
 
 const MAX_COVER_SIZE_BYTES = 5 * 1024 * 1024
 const ALLOWED_COVER_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"])
+const FLOW_PROGRESS_PREPARE = 5
+const FLOW_PROGRESS_UPLOAD_MAX = 78
+const FLOW_PROGRESS_TRANSCODE_START = 82
+const FLOW_PROGRESS_TRANSCODE_MAX = 98
+const FLOW_PROGRESS_POLL_TIMES = 80
 
 function onFileChange(event: Event) {
   const target = event.target as HTMLInputElement
@@ -214,6 +219,7 @@ async function onSubmit() {
   transcodeStatusText.value = ""
   canRetry.value = false
   try {
+    setFlowProgress(1)
     const file = selectedFile.value
     const init = await uploadInit({
       title: form.title.trim(),
@@ -222,6 +228,8 @@ async function onSubmit() {
       mimeType: file.type || "video/mp4",
       fileSize: file.size,
     })
+
+    setFlowProgress(FLOW_PROGRESS_PREPARE)
 
     const safeVideoId = resolveUploadVideoId(init.videoId, init.uploadUrl)
 
@@ -237,9 +245,11 @@ async function onSubmit() {
       uploadUrl: init.uploadUrl,
       file,
       onProgress: (percent) => {
-        uploadProgress.value = percent
+        setFlowProgress(mapUploadProgress(percent))
       },
     })
+
+    setFlowProgress(FLOW_PROGRESS_UPLOAD_MAX)
 
     if (selectedCoverFile.value) {
       await uploadCoverImage(safeVideoId, selectedCoverFile.value)
@@ -251,6 +261,8 @@ async function onSubmit() {
       mimeType: file.type || "video/mp4",
       fileSize: file.size,
     })
+
+    setFlowProgress(FLOW_PROGRESS_TRANSCODE_START)
 
     lastResult.value = complete
     ElMessage.success("上传成功，已进入转码队列")
@@ -287,16 +299,20 @@ async function retryUpload() {
   submitting.value = true
   canRetry.value = false
   uploadProgress.value = 0
+  transcodeStatusText.value = ""
   try {
+    setFlowProgress(FLOW_PROGRESS_PREPARE)
     await uploadLocalFileWithProgress({
       videoId: lastInit.value.videoId,
       objectKey: lastInit.value.objectKey,
       uploadUrl: lastInit.value.uploadUrl,
       file: selectedFile.value,
       onProgress: (percent) => {
-        uploadProgress.value = percent
+        setFlowProgress(mapUploadProgress(percent))
       },
     })
+
+    setFlowProgress(FLOW_PROGRESS_UPLOAD_MAX)
 
     const complete = await uploadComplete({
       videoId: lastInit.value.videoId,
@@ -304,6 +320,8 @@ async function retryUpload() {
       mimeType: selectedFile.value.type || "video/mp4",
       fileSize: selectedFile.value.size,
     })
+
+    setFlowProgress(FLOW_PROGRESS_TRANSCODE_START)
 
     lastResult.value = complete
     ElMessage.success("重试上传成功，已进入转码队列")
@@ -317,27 +335,63 @@ async function retryUpload() {
 }
 
 async function pollVideoStatus(videoId: number | string) {
-  transcodeStatusText.value = "转码中"
-  for (let i = 0; i < 20; i += 1) {
+  transcodeStatusText.value = "排队转码中"
+  setFlowProgress(FLOW_PROGRESS_TRANSCODE_START)
+
+  for (let i = 0; i < FLOW_PROGRESS_POLL_TIMES; i += 1) {
     await sleep(3000)
     try {
       const detail = await getAdminVideo(videoId)
       const status = detail.status || "unknown"
-      transcodeStatusText.value = status
+      transcodeStatusText.value = mapStatusText(status)
+
+      if (status === "transcoding" || status === "draft") {
+        const step =
+          FLOW_PROGRESS_TRANSCODE_START +
+          ((i + 1) / FLOW_PROGRESS_POLL_TIMES) * (FLOW_PROGRESS_TRANSCODE_MAX - FLOW_PROGRESS_TRANSCODE_START)
+        setFlowProgress(step)
+      }
 
       if (status === "ready" || status === "published") {
+        setFlowProgress(100)
         ElMessage.success("转码完成，可进入发布流程")
         return
       }
 
       if (status === "offline") {
+        setFlowProgress(FLOW_PROGRESS_TRANSCODE_START)
         ElMessage.warning("转码可能失败，请检查任务日志")
         return
       }
     } catch (_err) {
+      transcodeStatusText.value = "状态查询失败，请稍后重试"
       return
     }
   }
+
+  transcodeStatusText.value = "转码中（耗时较长，可在视频管理页查看）"
+}
+
+function setFlowProgress(next: number) {
+  const safe = Math.max(0, Math.min(100, Math.round(next)))
+  uploadProgress.value = Math.max(uploadProgress.value, safe)
+}
+
+function mapUploadProgress(percent: number) {
+  const safePercent = Math.max(0, Math.min(100, percent))
+  const span = FLOW_PROGRESS_UPLOAD_MAX - FLOW_PROGRESS_PREPARE
+  return FLOW_PROGRESS_PREPARE + (safePercent / 100) * span
+}
+
+function mapStatusText(status: string) {
+  const dict: Record<string, string> = {
+    draft: "排队中",
+    transcoding: "转码中",
+    ready: "转码完成（可播放）",
+    published: "已发布（可播放）",
+    offline: "转码失败或已下线",
+  }
+  return dict[status] || status
 }
 
 async function onSubmitExternal() {

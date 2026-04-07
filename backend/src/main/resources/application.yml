@@ -43,6 +43,10 @@ app:
     max-retry: ${TRANSCODE_MAX_RETRY:3}
   cover-analysis:
     worker-cron: ${COVER_ANALYSIS_WORKER_CRON:0/20 * * * * ?}
+  cover-auto:
+    enabled: ${COVER_AUTO_ENABLED:true}
+    snapshot-second: ${COVER_AUTO_SNAPSHOT_SECOND:3}
+    external-title-enabled: ${COVER_AUTO_EXTERNAL_TITLE_ENABLED:true}
   recommend:
     worker-cron: ${RECOMMEND_WORKER_CRON:0 5 * * * ?}
   hot-rank:

@@ -40,7 +40,9 @@
         <template #default="scope">
           <el-space>
             <el-button size="small" @click="openEdit(scope.row)">编辑</el-button>
-            <el-button size="small" type="success" @click="onPublish(scope.row.id)">发布</el-button>
+            <el-button v-if="scope.row.status !== 'published'" size="small" type="success" @click="onPublish(scope.row.id)">
+              发布
+            </el-button>
             <el-button size="small" type="warning" @click="onUnpublish(scope.row.id)">下线</el-button>
             <el-button v-if="scope.row.status === 'offline'" size="small" type="danger" @click="onDelete(scope.row)">
               删除

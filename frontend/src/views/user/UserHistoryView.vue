@@ -12,9 +12,13 @@
         <el-table-column prop="title" label="视频标题" min-width="220" />
         <el-table-column label="进度" min-width="240">
           <template #default="scope">
-            <div class="progress-cell">
+            <div v-if="hasDurationSnapshot(scope.row)" class="progress-cell">
               <el-progress :percentage="Math.round(Number(scope.row.completionRate || 0) * 100)" :stroke-width="10" />
               <span>{{ scope.row.lastProgressSec || 0 }}s</span>
+            </div>
+            <div v-else class="progress-fallback">
+              <el-tag type="info" effect="plain">已观看 {{ normalizedProgressSec(scope.row) }}s</el-tag>
+              <span class="fallback-note">总时长未知</span>
             </div>
           </template>
         </el-table-column>
@@ -87,6 +91,14 @@ async function openVideo(videoId: number | string) {
   await router.push(`/videos/${videoId}`)
 }
 
+function hasDurationSnapshot(item: UserWatchHistoryItem) {
+  return Number(item.durationSecSnapshot || 0) > 0
+}
+
+function normalizedProgressSec(item: UserWatchHistoryItem) {
+  return Math.max(0, Number(item.lastProgressSec || 0))
+}
+
 function formatDateTime(value: string | null) {
   if (!value) {
     return "-"
@@ -126,6 +138,17 @@ function formatDateTime(value: string | null) {
 
 .progress-cell :deep(.el-progress) {
   flex: 1;
+}
+
+.progress-fallback {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fallback-note {
+  color: #909399;
+  font-size: 12px;
 }
 
 .pager-wrap {

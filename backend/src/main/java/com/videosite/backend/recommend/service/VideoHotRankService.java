@@ -2,6 +2,7 @@ package com.videosite.backend.recommend.service;
 
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.videosite.backend.recommend.dto.VideoHotRankItemResponse;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,43 +44,47 @@ public class VideoHotRankService {
         String safeWindowType = normalizeWindowType(windowType);
         int safeLimit = normalizeLimit(limit);
 
-        List<Timestamp> bucketRows = jdbcTemplate.query(
-                "SELECT bucket_time FROM video_hot_rank_5m WHERE window_type = ? ORDER BY bucket_time DESC LIMIT 1",
-                (rs, rowNum) -> rs.getTimestamp("bucket_time"),
-                safeWindowType
-        );
-        if (bucketRows.isEmpty()) {
+        try {
+            List<Timestamp> bucketRows = jdbcTemplate.query(
+                    "SELECT bucket_time FROM video_hot_rank_5m WHERE window_type = ? ORDER BY bucket_time DESC LIMIT 1",
+                    (rs, rowNum) -> rs.getTimestamp("bucket_time"),
+                    safeWindowType
+            );
+            if (bucketRows.isEmpty()) {
+                return List.of();
+            }
+
+            Timestamp bucketTime = bucketRows.get(0);
+            return jdbcTemplate.query(
+                    "SELECT r.window_type, r.bucket_time, r.video_id, r.rank_index, r.hot_score, " +
+                            "v.title, v.cover_url, v.duration_sec, v.publish_at " +
+                            "FROM video_hot_rank_5m r " +
+                            "JOIN video v ON v.id = r.video_id " +
+                            "WHERE r.window_type = ? AND r.bucket_time = ? AND v.status = 'published' " +
+                            "ORDER BY r.rank_index ASC LIMIT ?",
+                    (rs, rowNum) -> {
+                        VideoHotRankItemResponse item = new VideoHotRankItemResponse();
+                        item.setWindowType(rs.getString("window_type"));
+                        item.setBucketTime(rs.getTimestamp("bucket_time") == null ? null : rs.getTimestamp("bucket_time").toLocalDateTime());
+                        item.setVideoId(rs.getLong("video_id"));
+                        item.setRankIndex(rs.getInt("rank_index"));
+
+                        BigDecimal hotScore = rs.getBigDecimal("hot_score");
+                        item.setHotScore(hotScore == null ? 0D : hotScore.doubleValue());
+
+                        item.setTitle(rs.getString("title"));
+                        item.setCoverUrl(rs.getString("cover_url"));
+                        item.setDurationSec(rs.getObject("duration_sec") == null ? null : rs.getInt("duration_sec"));
+                        item.setPublishAt(rs.getTimestamp("publish_at") == null ? null : rs.getTimestamp("publish_at").toLocalDateTime());
+                        return item;
+                    },
+                    safeWindowType,
+                    bucketTime,
+                    safeLimit
+            );
+        } catch (DataAccessException ex) {
             return List.of();
         }
-
-        Timestamp bucketTime = bucketRows.get(0);
-        return jdbcTemplate.query(
-                "SELECT r.window_type, r.bucket_time, r.video_id, r.rank_index, r.hot_score, " +
-                        "v.title, v.cover_url, v.duration_sec, v.publish_at " +
-                        "FROM video_hot_rank_5m r " +
-                        "JOIN video v ON v.id = r.video_id " +
-                        "WHERE r.window_type = ? AND r.bucket_time = ? AND v.status = 'published' " +
-                        "ORDER BY r.rank_index ASC LIMIT ?",
-                (rs, rowNum) -> {
-                    VideoHotRankItemResponse item = new VideoHotRankItemResponse();
-                    item.setWindowType(rs.getString("window_type"));
-                    item.setBucketTime(rs.getTimestamp("bucket_time") == null ? null : rs.getTimestamp("bucket_time").toLocalDateTime());
-                    item.setVideoId(rs.getLong("video_id"));
-                    item.setRankIndex(rs.getInt("rank_index"));
-
-                    BigDecimal hotScore = rs.getBigDecimal("hot_score");
-                    item.setHotScore(hotScore == null ? 0D : hotScore.doubleValue());
-
-                    item.setTitle(rs.getString("title"));
-                    item.setCoverUrl(rs.getString("cover_url"));
-                    item.setDurationSec(rs.getObject("duration_sec") == null ? null : rs.getInt("duration_sec"));
-                    item.setPublishAt(rs.getTimestamp("publish_at") == null ? null : rs.getTimestamp("publish_at").toLocalDateTime());
-                    return item;
-                },
-                safeWindowType,
-                bucketTime,
-                safeLimit
-        );
     }
 
     @Transactional(rollbackFor = Exception.class)

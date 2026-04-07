@@ -1,11 +1,15 @@
 package com.videosite.backend.transcode;
 
 import com.videosite.backend.storage.StorageService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -14,12 +18,16 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
 @Service
 public class TranscodeService {
+
+    private static final Logger log = LoggerFactory.getLogger(TranscodeService.class);
 
     private final JdbcTemplate jdbcTemplate;
     private final StorageService storageService;
@@ -33,6 +41,12 @@ public class TranscodeService {
 
     @Value("${app.storage.local-root:../}")
     private String localStorageRoot;
+
+    @Value("${app.cover-auto.enabled:true}")
+    private boolean autoCoverEnabled;
+
+    @Value("${app.cover-auto.snapshot-second:3}")
+    private int autoCoverSnapshotSecond;
 
     public TranscodeService(JdbcTemplate jdbcTemplate,
                             StorageService storageService,
@@ -110,6 +124,7 @@ public class TranscodeService {
         writeMasterPlaylist(masterObjectKey, variants);
 
         writeVariantAndPlaySource(task.getVideoId(), masterObjectKey, variants);
+        tryGenerateAutoFrameCover(task.getVideoId(), sourcePath);
     }
 
     private String findSourceObjectKey(Long videoId) {
@@ -224,6 +239,61 @@ public class TranscodeService {
         if (exitCode != 0) {
             throw new IllegalStateException("FFmpeg 执行失败，exitCode=" + exitCode + "，日志：" + logs);
         }
+    }
+
+    private void tryGenerateAutoFrameCover(Long videoId, Path sourcePath) {
+        if (!autoCoverEnabled || sourcePath == null || !Files.exists(sourcePath) || hasCoverUrl(videoId)) {
+            return;
+        }
+
+        String objectKey = buildAutoFrameObjectKey(videoId);
+        Path outputPath = resolveLocalPathByObjectKey(objectKey);
+
+        try {
+            Files.createDirectories(outputPath.getParent());
+            runCommand(ffmpegCommandBuilder.buildSnapshotCommand(ffmpegBin, sourcePath, outputPath, autoCoverSnapshotSecond));
+
+            if (!Files.exists(outputPath) || Files.size(outputPath) <= 0) {
+                log.warn("Auto frame cover was not generated, videoId={}, outputPath={}", videoId, outputPath);
+                return;
+            }
+
+            String coverUrl = storageService.getUploadUrl(objectKey);
+            int changed = jdbcTemplate.update(
+                    "UPDATE video SET cover_url = ?, updated_at = NOW() WHERE id = ? AND (cover_url IS NULL OR cover_url = '')",
+                    coverUrl,
+                    videoId
+            );
+
+            if (changed > 0) {
+                log.info("Auto frame cover generated for videoId={}, objectKey={}", videoId, objectKey);
+            }
+        } catch (Exception ex) {
+            log.warn("Generate auto frame cover failed for videoId={}, message={}", videoId, ex.getMessage());
+        }
+    }
+
+    private boolean hasCoverUrl(Long videoId) {
+        try {
+            List<String> rows = jdbcTemplate.query(
+                    "SELECT cover_url FROM video WHERE id = ? LIMIT 1",
+                    (rs, rowNum) -> rs.getString("cover_url"),
+                    videoId
+            );
+
+            if (rows.isEmpty()) {
+                return false;
+            }
+            return StringUtils.hasText(rows.get(0));
+        } catch (DataAccessException ex) {
+            log.warn("Check cover url failed for videoId={}, message={}", videoId, ex.getMessage());
+            return false;
+        }
+    }
+
+    private String buildAutoFrameObjectKey(Long videoId) {
+        String datePart = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
+        return "images/covers/" + datePart + "/" + videoId + "_auto_frame.jpg";
     }
 
     @Transactional(rollbackFor = Exception.class)

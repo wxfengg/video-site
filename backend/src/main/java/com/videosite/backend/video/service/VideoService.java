@@ -9,6 +9,9 @@ import com.videosite.backend.video.dto.VideoDetailResponse;
 import com.videosite.backend.video.dto.VideoListItemResponse;
 import com.videosite.backend.video.dto.VideoPlaySourcesResponse;
 import com.videosite.backend.video.dto.VideoUpdateRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -26,11 +29,21 @@ import java.util.Locale;
 public class VideoService {
 
     private static final int MAX_PAGE_SIZE = 100;
+    private static final Logger log = LoggerFactory.getLogger(VideoService.class);
 
     private final JdbcTemplate jdbcTemplate;
+    private final ExternalTitleCoverService externalTitleCoverService;
 
-    public VideoService(JdbcTemplate jdbcTemplate) {
+    @Value("${app.cover-auto.enabled:true}")
+    private boolean autoCoverEnabled;
+
+    @Value("${app.cover-auto.external-title-enabled:true}")
+    private boolean autoExternalTitleCoverEnabled;
+
+    public VideoService(JdbcTemplate jdbcTemplate,
+                        ExternalTitleCoverService externalTitleCoverService) {
         this.jdbcTemplate = jdbcTemplate;
+        this.externalTitleCoverService = externalTitleCoverService;
     }
 
     public PageResult<VideoListItemResponse> listPublicVideos(int page, int pageSize, String keyword) {
@@ -110,6 +123,8 @@ public class VideoService {
     public VideoDetailResponse createExternalVideo(ExternalVideoCreateRequest request) {
         String protocol = request.getSourceProtocol().trim().toLowerCase(Locale.ROOT);
         String sourceUrl = request.getSourceUrl().trim();
+        String title = request.getTitle().trim();
+        String inputCoverUrl = emptyToNull(request.getCoverUrl());
 
         String lowerUrl = sourceUrl.toLowerCase(Locale.ROOT);
         if ("hls".equals(protocol) && !lowerUrl.contains(".m3u8")) {
@@ -123,11 +138,15 @@ public class VideoService {
         jdbcTemplate.update(
                 "INSERT INTO video (id, title, description, cover_url, duration_sec, status, publish_at, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'ready', NULL, NULL, NOW(), NOW())",
                 videoId,
-                request.getTitle().trim(),
+            title,
                 emptyToNull(request.getDescription()),
-                emptyToNull(request.getCoverUrl()),
+            inputCoverUrl,
                 request.getDurationSec()
         );
+
+        if (!StringUtils.hasText(inputCoverUrl)) {
+            tryGenerateExternalTitleCover(videoId, title);
+        }
 
         jdbcTemplate.update(
                 "INSERT INTO video_source (id, video_id, source_mode, source_protocol, source_url, created_at, updated_at) VALUES (?, ?, 'external', ?, ?, NOW(), NOW())",
@@ -138,6 +157,23 @@ public class VideoService {
         );
 
         return getVideoDetail(videoId, true);
+    }
+
+    private void tryGenerateExternalTitleCover(Long videoId, String title) {
+        if (!autoCoverEnabled || !autoExternalTitleCoverEnabled) {
+            return;
+        }
+
+        try {
+            String generatedCoverUrl = externalTitleCoverService.generateTitleCover(videoId, title);
+            jdbcTemplate.update(
+                    "UPDATE video SET cover_url = ?, updated_at = NOW() WHERE id = ? AND (cover_url IS NULL OR cover_url = '')",
+                    generatedCoverUrl,
+                    videoId
+            );
+        } catch (Exception ex) {
+            log.warn("Generate external title cover failed, videoId={}, message={}", videoId, ex.getMessage());
+        }
     }
 
     @Transactional(rollbackFor = Exception.class)

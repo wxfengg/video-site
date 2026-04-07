@@ -63,4 +63,23 @@ public class FfmpegCommandBuilder {
         command.add(playlistPath.toString());
         return command;
     }
+
+    public List<String> buildSnapshotCommand(String ffmpegBin,
+                                             Path inputPath,
+                                             Path outputPath,
+                                             int snapshotSecond) {
+        List<String> command = new ArrayList<>();
+        command.add(ffmpegBin);
+        command.add("-y");
+        command.add("-ss");
+        command.add(String.valueOf(Math.max(snapshotSecond, 0)));
+        command.add("-i");
+        command.add(inputPath.toString());
+        command.add("-frames:v");
+        command.add("1");
+        command.add("-q:v");
+        command.add("2");
+        command.add(outputPath.toString());
+        return command;
+    }
 }

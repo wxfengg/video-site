@@ -10,7 +10,7 @@
       @pause="emit('pause')"
       @loadedmetadata="onLoadedMetadata"
       @timeupdate="onTimeUpdate"
-      @ended="emit('ended')"
+      @ended="onEnded"
     />
     <el-empty v-if="!activeUrl" description="播放源尚未就绪" />
   </div>
@@ -40,7 +40,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   play: []
   pause: []
-  ended: []
+  ended: [payload: { currentTimeSec: number; durationSec: number | null }]
   progress: [seconds: number]
 }>()
 
@@ -86,6 +86,18 @@ function onLoadedMetadata() {
 
   const duration = Number.isFinite(videoRef.value.duration) ? videoRef.value.duration : 0
   videoRef.value.currentTime = duration > 0 ? Math.min(target, Math.max(0, Math.floor(duration) - 1)) : target
+}
+
+function onEnded() {
+  if (!videoRef.value) {
+    emit("ended", { currentTimeSec: 0, durationSec: null })
+    return
+  }
+
+  const currentTimeSec = Math.max(0, Math.floor(videoRef.value.currentTime || 0))
+  const rawDuration = videoRef.value.duration
+  const durationSec = Number.isFinite(rawDuration) && rawDuration > 0 ? Math.max(1, Math.floor(rawDuration)) : null
+  emit("ended", { currentTimeSec, durationSec })
 }
 </script>
 
