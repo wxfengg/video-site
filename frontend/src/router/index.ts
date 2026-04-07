@@ -83,6 +83,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import("../views/admin/VideoManageView.vue"),
       },
       {
+        path: "users",
+        name: "AdminUserManage",
+        component: () => import("../views/admin/UserManageView.vue"),
+      },
+      {
         path: "ab-experiments",
         name: "AdminAbExperiments",
         component: () => import("../views/admin/AbExperimentView.vue"),

@@ -22,10 +22,7 @@
         <input ref="fileInput" type="file" accept="video/*" aria-label="选择视频文件" @change="onFileChange" />
       </el-form-item>
       <el-form-item label="封面图">
-        <input ref="coverInput" type="file" accept="image/*" aria-label="选择封面图" @change="onCoverFileChange" />
-        <div v-if="coverPreviewUrl" class="cover-preview-wrap">
-          <img :src="coverPreviewUrl" alt="封面预览" class="cover-preview" />
-        </div>
+        <ImageUploadSelector v-model="selectedCoverFile" button-text="选择封面图" preview-alt="封面预览" />
       </el-form-item>
       <el-form-item>
         <el-button type="primary" :loading="submitting" @click="onSubmit">上传并入库</el-button>
@@ -66,8 +63,13 @@
       <el-form-item label="外链地址" required>
         <el-input v-model="externalForm.sourceUrl" placeholder="https://example.com/master.m3u8" />
       </el-form-item>
-      <el-form-item label="封面URL">
-        <el-input v-model="externalForm.coverUrl" placeholder="可选：封面图片地址" />
+      <el-form-item label="封面图">
+        <ImageUploadSelector
+          v-model="selectedExternalCoverFile"
+          button-text="选择外链封面"
+          preview-alt="外链封面预览"
+          :disabled="externalSubmitting"
+        />
       </el-form-item>
       <el-form-item label="时长(秒)">
         <el-input-number v-model="externalForm.durationSec" :min="1" :max="86400" />
@@ -86,8 +88,9 @@
 </template>
 
 <script setup lang="ts">
-import { onUnmounted, reactive, ref } from "vue"
+import { reactive, ref } from "vue"
 import { ElMessage } from "element-plus"
+import ImageUploadSelector from "../../components/image/ImageUploadSelector.vue"
 import {
   createExternalVideo,
   getAdminVideo,
@@ -100,11 +103,9 @@ import {
 } from "../../apis/video"
 
 const fileInput = ref<HTMLInputElement | null>(null)
-const coverInput = ref<HTMLInputElement | null>(null)
 const submitting = ref(false)
 const selectedFile = ref<File | null>(null)
 const selectedCoverFile = ref<File | null>(null)
-const coverPreviewUrl = ref("")
 const lastResult = ref<UploadCompleteResponse | null>(null)
 const uploadProgress = ref(0)
 const transcodeStatusText = ref("")
@@ -112,6 +113,7 @@ const canRetry = ref(false)
 const lastInit = ref<{ videoId: string; objectKey: string; uploadUrl: string } | null>(null)
 const externalSubmitting = ref(false)
 const externalResult = ref<VideoDetail | null>(null)
+const selectedExternalCoverFile = ref<File | null>(null)
 
 const form = reactive({
   title: "",
@@ -123,12 +125,9 @@ const externalForm = reactive({
   description: "",
   sourceProtocol: "hls" as "hls" | "mp4",
   sourceUrl: "",
-  coverUrl: "",
   durationSec: undefined as number | undefined,
 })
 
-const MAX_COVER_SIZE_BYTES = 5 * 1024 * 1024
-const ALLOWED_COVER_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"])
 const FLOW_PROGRESS_PREPARE = 5
 const FLOW_PROGRESS_UPLOAD_MAX = 78
 const FLOW_PROGRESS_TRANSCODE_START = 82
@@ -138,62 +137,6 @@ const FLOW_PROGRESS_POLL_TIMES = 80
 function onFileChange(event: Event) {
   const target = event.target as HTMLInputElement
   selectedFile.value = target.files?.[0] || null
-}
-
-function onCoverFileChange(event: Event) {
-  const target = event.target as HTMLInputElement
-  const file = target.files?.[0] || null
-
-  if (file && !validateCoverFile(file)) {
-    target.value = ""
-    selectedCoverFile.value = null
-    if (coverPreviewUrl.value) {
-      URL.revokeObjectURL(coverPreviewUrl.value)
-      coverPreviewUrl.value = ""
-    }
-    return
-  }
-
-  selectedCoverFile.value = file
-
-  if (coverPreviewUrl.value) {
-    URL.revokeObjectURL(coverPreviewUrl.value)
-    coverPreviewUrl.value = ""
-  }
-
-  if (file) {
-    coverPreviewUrl.value = URL.createObjectURL(file)
-  }
-}
-
-function validateCoverFile(file: File): boolean {
-  if (file.size > MAX_COVER_SIZE_BYTES) {
-    ElMessage.warning("封面图片不能超过 5MB")
-    return false
-  }
-
-  const type = (file.type || "").toLowerCase()
-  if (type) {
-    if (!ALLOWED_COVER_MIME_TYPES.has(type)) {
-      ElMessage.warning("封面仅支持 jpg/jpeg、png、webp 格式")
-      return false
-    }
-    return true
-  }
-
-  const lowerName = file.name.toLowerCase()
-  if (
-    !(
-      lowerName.endsWith(".jpg") ||
-      lowerName.endsWith(".jpeg") ||
-      lowerName.endsWith(".png") ||
-      lowerName.endsWith(".webp")
-    )
-  ) {
-    ElMessage.warning("封面仅支持 jpg/jpeg、png、webp 格式")
-    return false
-  }
-  return true
 }
 
 function resolveUploadVideoId(videoId: number | string, uploadUrl: string): string {
@@ -272,15 +215,8 @@ async function onSubmit() {
     if (fileInput.value) {
       fileInput.value.value = ""
     }
-    if (coverInput.value) {
-      coverInput.value.value = ""
-    }
     selectedFile.value = null
     selectedCoverFile.value = null
-    if (coverPreviewUrl.value) {
-      URL.revokeObjectURL(coverPreviewUrl.value)
-      coverPreviewUrl.value = ""
-    }
   } catch (err) {
     canRetry.value = true
     const message = err instanceof Error ? err.message : "上传失败，请检查后端服务与文件大小"
@@ -409,20 +345,33 @@ async function onSubmitExternal() {
     const created = await createExternalVideo({
       title: externalForm.title.trim(),
       description: externalForm.description.trim() || undefined,
-      coverUrl: externalForm.coverUrl.trim() || undefined,
       sourceProtocol: externalForm.sourceProtocol,
       sourceUrl: externalForm.sourceUrl.trim(),
       durationSec: externalForm.durationSec,
     })
-    externalResult.value = created
-    ElMessage.success("外链视频创建成功")
+
+    let finalDetail = created
+    if (selectedExternalCoverFile.value) {
+      try {
+        await uploadCoverImage(created.id, selectedExternalCoverFile.value)
+        finalDetail = await getAdminVideo(created.id)
+        ElMessage.success("外链视频创建成功，封面上传成功")
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "封面上传失败"
+        ElMessage.warning(`外链视频已创建，但${message}`)
+      }
+    } else {
+      ElMessage.success("外链视频创建成功")
+    }
+
+    externalResult.value = finalDetail
 
     externalForm.title = ""
     externalForm.description = ""
     externalForm.sourceUrl = ""
-    externalForm.coverUrl = ""
     externalForm.durationSec = undefined
     externalForm.sourceProtocol = "hls"
+    selectedExternalCoverFile.value = null
   } catch (_err) {
     ElMessage.error("外链视频创建失败，请检查直链格式")
   } finally {
@@ -435,30 +384,11 @@ function sleep(ms: number) {
     setTimeout(resolve, ms)
   })
 }
-
-onUnmounted(() => {
-  if (coverPreviewUrl.value) {
-    URL.revokeObjectURL(coverPreviewUrl.value)
-  }
-})
 </script>
 
 <style scoped>
 .status-alert {
   margin-top: 12px;
-}
-
-.cover-preview-wrap {
-  margin-top: 8px;
-}
-
-.cover-preview {
-  width: 220px;
-  max-width: 100%;
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
 }
 
 .section-title {

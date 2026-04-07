@@ -7,7 +7,7 @@
       preload="metadata"
       :src="activeUrl || undefined"
       @play="emit('play')"
-      @pause="emit('pause')"
+      @pause="onPause"
       @loadedmetadata="onLoadedMetadata"
       @timeupdate="onTimeUpdate"
       @ended="onEnded"
@@ -39,7 +39,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   play: []
-  pause: []
+  pause: [payload: { currentTimeSec: number; durationSec: number | null }]
   ended: [payload: { currentTimeSec: number; durationSec: number | null }]
   progress: [seconds: number]
 }>()
@@ -98,6 +98,18 @@ function onEnded() {
   const rawDuration = videoRef.value.duration
   const durationSec = Number.isFinite(rawDuration) && rawDuration > 0 ? Math.max(1, Math.floor(rawDuration)) : null
   emit("ended", { currentTimeSec, durationSec })
+}
+
+function onPause() {
+  if (!videoRef.value) {
+    emit("pause", { currentTimeSec: 0, durationSec: null })
+    return
+  }
+
+  const currentTimeSec = Math.max(0, Math.floor(videoRef.value.currentTime || 0))
+  const rawDuration = videoRef.value.duration
+  const durationSec = Number.isFinite(rawDuration) && rawDuration > 0 ? Math.max(1, Math.floor(rawDuration)) : null
+  emit("pause", { currentTimeSec, durationSec })
 }
 </script>
 

@@ -85,7 +85,7 @@ interface DashboardRangeQuery extends Record<string, unknown> {
 }
 
 interface DashboardFunnelQuery extends DashboardRangeQuery {
-  videoId?: number
+  videoId?: number | string
 }
 
 function queryString<T extends object>(params: T) {

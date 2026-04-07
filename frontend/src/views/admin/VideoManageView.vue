@@ -40,7 +40,12 @@
         <template #default="scope">
           <el-space>
             <el-button size="small" @click="openEdit(scope.row)">编辑</el-button>
-            <el-button v-if="scope.row.status !== 'published'" size="small" type="success" @click="onPublish(scope.row.id)">
+            <el-button
+              v-if="scope.row.status !== 'published'"
+              size="small"
+              type="success"
+              @click="onPublish(scope.row.id)"
+            >
               发布
             </el-button>
             <el-button size="small" type="warning" @click="onUnpublish(scope.row.id)">下线</el-button>
@@ -84,16 +89,14 @@
       <el-form-item label="封面">
         <el-input v-model="editForm.coverUrl" maxlength="512" name="editCoverUrl" aria-label="编辑封面链接" />
         <div class="cover-edit-actions">
-          <input
-            ref="editCoverInput"
-            type="file"
-            accept="image/*"
-            aria-label="上传新封面"
-            @change="onEditCoverFileChange"
+          <ImageUploadSelector
+            v-model="editCoverFile"
+            :preview-url="editForm.coverUrl"
+            button-text="选择封面图片"
+            preview-alt="封面预览"
           />
           <el-button size="small" :loading="coverUploading" @click="uploadEditCover">上传并替换封面</el-button>
         </div>
-        <img v-if="editForm.coverUrl" :src="editForm.coverUrl" alt="当前封面" class="cover-preview" />
       </el-form-item>
     </el-form>
     <template #footer>
@@ -107,6 +110,7 @@
 import { computed, onMounted, reactive, ref } from "vue"
 import { useRouter } from "vue-router"
 import { ElMessage, ElMessageBox } from "element-plus"
+import ImageUploadSelector from "../../components/image/ImageUploadSelector.vue"
 import {
   deleteVideo,
   getAdminVideo,
@@ -134,7 +138,6 @@ const pagedRows = computed(() => {
 
 const editVisible = ref(false)
 const editId = ref<string | number | null>(null)
-const editCoverInput = ref<HTMLInputElement | null>(null)
 const editCoverFile = ref<File | null>(null)
 const coverUploading = ref(false)
 const editForm = reactive({
@@ -142,9 +145,6 @@ const editForm = reactive({
   description: "",
   coverUrl: "",
 })
-
-const MAX_COVER_SIZE_BYTES = 5 * 1024 * 1024
-const ALLOWED_COVER_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"])
 
 onMounted(async () => {
   await reload()
@@ -187,9 +187,6 @@ async function openEdit(row: VideoListItem) {
   editForm.description = ""
   editForm.coverUrl = row.coverUrl || ""
   editCoverFile.value = null
-  if (editCoverInput.value) {
-    editCoverInput.value.value = ""
-  }
 
   try {
     const detail = await getAdminVideo(row.id)
@@ -200,48 +197,6 @@ async function openEdit(row: VideoListItem) {
   }
 
   editVisible.value = true
-}
-
-function onEditCoverFileChange(event: Event) {
-  const target = event.target as HTMLInputElement
-  const file = target.files?.[0] || null
-  if (file && !validateCoverFile(file)) {
-    target.value = ""
-    editCoverFile.value = null
-    return
-  }
-  editCoverFile.value = file
-}
-
-function validateCoverFile(file: File): boolean {
-  if (file.size > MAX_COVER_SIZE_BYTES) {
-    ElMessage.warning("封面图片不能超过 5MB")
-    return false
-  }
-
-  const type = (file.type || "").toLowerCase()
-  if (type) {
-    if (!ALLOWED_COVER_MIME_TYPES.has(type)) {
-      ElMessage.warning("封面仅支持 jpg/jpeg、png、webp 格式")
-      return false
-    }
-    return true
-  }
-
-  const lowerName = file.name.toLowerCase()
-  if (
-    !(
-      lowerName.endsWith(".jpg") ||
-      lowerName.endsWith(".jpeg") ||
-      lowerName.endsWith(".png") ||
-      lowerName.endsWith(".webp")
-    )
-  ) {
-    ElMessage.warning("封面仅支持 jpg/jpeg、png、webp 格式")
-    return false
-  }
-
-  return true
 }
 
 async function uploadEditCover() {
@@ -259,9 +214,6 @@ async function uploadEditCover() {
     editForm.coverUrl = result.coverUrl
     ElMessage.success("封面上传成功")
     editCoverFile.value = null
-    if (editCoverInput.value) {
-      editCoverInput.value.value = ""
-    }
   } catch (err) {
     const message = err instanceof Error ? err.message : "封面上传失败"
     ElMessage.error(message)
@@ -358,17 +310,7 @@ async function openPlayer(row: VideoListItem) {
 .cover-edit-actions {
   margin-top: 8px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
-}
-
-.cover-preview {
-  margin-top: 10px;
-  width: 220px;
-  max-width: 100%;
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
 }
 </style>

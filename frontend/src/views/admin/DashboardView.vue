@@ -10,7 +10,16 @@
           end-placeholder="结束日期"
           unlink-panels
         />
-        <el-input-number v-model="funnelVideoId" :min="1" placeholder="漏斗视频ID(可选)" />
+        <el-select
+          v-model="funnelVideoId"
+          clearable
+          filterable
+          style="width: 280px"
+          placeholder="选择漏斗视频（可选）"
+          :loading="videoOptionsLoading"
+        >
+          <el-option v-for="item in videoOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
         <el-button type="primary" @click="reloadAll">刷新看板</el-button>
       </div>
     </el-card>
@@ -127,10 +136,13 @@ import {
   type DashboardTrafficTrendResponse,
   type DashboardUserGrowthResponse,
 } from "../../apis/dashboard"
+import { getAdminVideos } from "../../apis/video"
 
 const loading = ref(false)
 const dateRange = ref<[Date, Date] | null>(defaultDateRange())
-const funnelVideoId = ref<number | null>(null)
+const funnelVideoId = ref<string | null>(null)
+const videoOptionsLoading = ref(false)
+const videoOptions = ref<Array<{ label: string; value: string }>>([])
 
 const overview = ref<DashboardOverviewResponse | null>(null)
 const trafficTrend = ref<DashboardTrafficTrendResponse | null>(null)
@@ -149,7 +161,7 @@ onMounted(async () => {
   await nextTick()
   initCharts()
   window.addEventListener("resize", onResize)
-  await reloadAll()
+  await Promise.all([loadVideoOptions(), reloadAll()])
 })
 
 onBeforeUnmount(() => {
@@ -165,8 +177,8 @@ async function reloadAll() {
     overview.value = overviewData
 
     if (funnelVideoId.value === null && overviewData.hotVideos.length > 0) {
-      const hotVideoId = Number(overviewData.hotVideos[0].videoId)
-      if (!Number.isNaN(hotVideoId) && hotVideoId > 0) {
+      const hotVideoId = String(overviewData.hotVideos[0].videoId || "").trim()
+      if (hotVideoId) {
         funnelVideoId.value = hotVideoId
       }
     }
@@ -196,6 +208,30 @@ function renderCharts() {
   renderTrafficChart()
   renderGrowthChart()
   renderFunnelChart()
+}
+
+async function loadVideoOptions() {
+  videoOptionsLoading.value = true
+  try {
+    const list = await getAdminVideos(1, 1000, "", "")
+    const options = (list.records || []).map((item) => ({
+      label: item.title || `视频 ${item.id}`,
+      value: String(item.id),
+    }))
+
+    const uniqueMap = new Map<string, { label: string; value: string }>()
+    for (const option of options) {
+      if (!uniqueMap.has(option.value)) {
+        uniqueMap.set(option.value, option)
+      }
+    }
+
+    videoOptions.value = Array.from(uniqueMap.values())
+  } catch (_err) {
+    videoOptions.value = []
+  } finally {
+    videoOptionsLoading.value = false
+  }
 }
 
 function initCharts() {

@@ -10,7 +10,14 @@
     <el-table :data="pagedRows" v-loading="loading" border>
       <el-table-column prop="name" label="实验名" min-width="160" />
       <el-table-column prop="scene" label="场景" width="120" />
-      <el-table-column prop="targetVideoId" label="目标视频ID" width="140" />
+      <el-table-column label="目标视频" min-width="220">
+        <template #default="scope">
+          <div class="video-target-cell">
+            <span class="video-title">{{ resolveVideoTitle(scope.row.targetVideoId) }}</span>
+            <span class="video-id">ID: {{ scope.row.targetVideoId }}</span>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column prop="status" label="状态" width="120" />
       <el-table-column label="变体" min-width="280">
         <template #default="scope">
@@ -53,8 +60,16 @@
       <el-form-item label="场景">
         <el-input v-model="form.scene" placeholder="例如 home_cover" />
       </el-form-item>
-      <el-form-item label="目标视频ID">
-        <el-input-number v-model="form.targetVideoId" :min="1" />
+      <el-form-item label="目标视频" required>
+        <el-select
+          v-model="form.targetVideoId"
+          filterable
+          placeholder="请选择目标视频"
+          style="width: 320px"
+          :loading="videoOptionsLoading"
+        >
+          <el-option v-for="item in videoOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
       </el-form-item>
       <el-form-item label="主指标">
         <el-input v-model="form.metricPrimary" placeholder="ctr" />
@@ -82,6 +97,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue"
 import { ElMessage } from "element-plus"
+import { getAdminVideos } from "../../apis/video"
 import {
   createAbExperiment,
   listAbExperiments,
@@ -97,6 +113,8 @@ const page = ref(1)
 const pageSize = 10
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
+const videoOptionsLoading = ref(false)
+const videoOptions = ref<Array<{ value: string; label: string }>>([])
 
 const total = computed(() => rows.value.length)
 const pagedRows = computed(() => {
@@ -104,10 +122,14 @@ const pagedRows = computed(() => {
   return rows.value.slice(start, start + pageSize)
 })
 
+const videoTitleMap = computed(() => {
+  return new Map(videoOptions.value.map((item) => [item.value, item.label]))
+})
+
 const form = reactive({
   name: "",
   scene: "home_cover",
-  targetVideoId: 1,
+  targetVideoId: "",
   metricPrimary: "ctr",
   variants: [
     { variantCode: "A", coverUrl: "", trafficRatio: 50 },
@@ -116,7 +138,7 @@ const form = reactive({
 })
 
 onMounted(async () => {
-  await reload()
+  await Promise.all([reload(), loadVideoOptions()])
 })
 
 async function reload() {
@@ -141,7 +163,7 @@ function onPageChange(nextPage: number) {
 function resetForm() {
   form.name = ""
   form.scene = "home_cover"
-  form.targetVideoId = 1
+  form.targetVideoId = videoOptions.value[0]?.value || ""
   form.metricPrimary = "ctr"
   form.variants = [
     { variantCode: "A", coverUrl: "", trafficRatio: 50 },
@@ -159,7 +181,7 @@ function openEdit(item: AbExperiment) {
   editingId.value = item.id
   form.name = item.name
   form.scene = item.scene
-  form.targetVideoId = item.targetVideoId
+  form.targetVideoId = String(item.targetVideoId)
   form.metricPrimary = item.metricPrimary
   form.variants = item.variants.map((v) => ({
     variantCode: v.variantCode,
@@ -182,6 +204,11 @@ function removeVariant(index: number) {
 }
 
 async function submit() {
+  if (!form.targetVideoId) {
+    ElMessage.warning("请选择目标视频")
+    return
+  }
+
   const ratioSum = form.variants.reduce((sum, item) => sum + Number(item.trafficRatio || 0), 0)
   if (ratioSum !== 100) {
     ElMessage.warning("变体流量占比总和必须为100")
@@ -192,7 +219,7 @@ async function submit() {
     const payload = {
       name: form.name,
       scene: form.scene,
-      targetVideoId: Number(form.targetVideoId),
+      targetVideoId: form.targetVideoId,
       metricPrimary: form.metricPrimary,
       variants: form.variants.map((item) => ({
         variantCode: item.variantCode,
@@ -235,6 +262,37 @@ async function onStop(experimentId: number) {
     ElMessage.error("停止失败")
   }
 }
+
+async function loadVideoOptions() {
+  videoOptionsLoading.value = true
+  try {
+    const data = await getAdminVideos(1, 1000, "", "")
+    const mapped = (data.records || []).map((item) => ({
+      value: String(item.id),
+      label: item.title || `视频 ${item.id}`,
+    }))
+
+    const unique = new Map<string, { value: string; label: string }>()
+    for (const item of mapped) {
+      if (!unique.has(item.value)) {
+        unique.set(item.value, item)
+      }
+    }
+
+    videoOptions.value = Array.from(unique.values())
+    if (!form.targetVideoId && videoOptions.value.length > 0) {
+      form.targetVideoId = videoOptions.value[0].value
+    }
+  } catch (_err) {
+    videoOptions.value = []
+  } finally {
+    videoOptionsLoading.value = false
+  }
+}
+
+function resolveVideoTitle(videoId: number | string) {
+  return videoTitleMap.value.get(String(videoId)) || "未知视频"
+}
 </script>
 
 <style scoped>
@@ -255,5 +313,20 @@ async function onStop(experimentId: number) {
   margin-top: 16px;
   display: flex;
   justify-content: flex-end;
+}
+
+.video-target-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.video-title {
+  color: #303133;
+}
+
+.video-id {
+  font-size: 12px;
+  color: #909399;
 }
 </style>

@@ -6,6 +6,7 @@
         <el-menu-item index="/admin">控制台</el-menu-item>
         <el-menu-item index="/admin/upload">视频上传</el-menu-item>
         <el-menu-item index="/admin/videos">视频管理</el-menu-item>
+        <el-menu-item index="/admin/users">用户管理</el-menu-item>
         <el-menu-item index="/admin/ab-experiments">A/B 实验</el-menu-item>
         <el-menu-item index="/admin/ab-reports">A/B 报表</el-menu-item>
       </el-menu>

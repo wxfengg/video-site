@@ -11,7 +11,7 @@ export interface AbExperiment {
   id: number
   name: string
   scene: string
-  targetVideoId: number
+  targetVideoId: number | string
   status: "draft" | "running" | "stopped"
   metricPrimary: string
   startAt?: string | null
@@ -22,7 +22,7 @@ export interface AbExperiment {
 export interface AbExperimentSaveRequest {
   name: string
   scene: string
-  targetVideoId: number
+  targetVideoId: number | string
   metricPrimary: string
   startAt?: string
   endAt?: string

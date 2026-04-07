@@ -207,7 +207,11 @@ function onProgress(seconds: number) {
   }
 
   const safeSeconds = Math.max(0, Math.floor(seconds))
-  latestObservedProgressSec.value = Math.max(latestObservedProgressSec.value, safeSeconds)
+
+  if (safeSeconds + 1 < latestObservedProgressSec.value) {
+    sentProgressSec.value.clear()
+  }
+  latestObservedProgressSec.value = safeSeconds
 
   if (safeSeconds < 5 || safeSeconds % 5 !== 0) {
     return
@@ -243,24 +247,35 @@ function onEnded(payload: { currentTimeSec: number; durationSec: number | null }
     return
   }
 
-  latestObservedProgressSec.value = Math.max(latestObservedProgressSec.value, finalProgressSec)
+  latestObservedProgressSec.value = finalProgressSec
 
   const durationSnapshot = Math.max(fromPayloadDuration, fromDetailDuration, finalProgressSec)
   void syncProgress(finalProgressSec, { durationSecSnapshot: durationSnapshot, force: true })
 }
 
-function onPause() {
+function onPause(payload: { currentTimeSec: number; durationSec: number | null }) {
   if (videoId.value === null) {
     return
   }
 
-  const latestFromTracked = sentProgressSec.value.size > 0 ? Math.max(...Array.from(sentProgressSec.value.values())) : 0
-  const latest = Math.max(latestObservedProgressSec.value, latestFromTracked, resumeProgressSec.value)
+  const fromPayloadTime = Math.max(0, Math.floor(payload?.currentTimeSec || 0))
+  if (fromPayloadTime + 1 < latestObservedProgressSec.value) {
+    sentProgressSec.value.clear()
+  }
+  latestObservedProgressSec.value = fromPayloadTime
+
+  const latest = Math.max(0, Math.floor(latestObservedProgressSec.value))
   if (latest <= 0) {
     return
   }
 
-  void syncProgress(latest, { durationSecSnapshot: detail.value?.durationSec || undefined })
+  const fromPayloadDuration = Math.max(0, Math.floor(payload?.durationSec || 0))
+  const fromDetailDuration = Math.max(0, Math.floor(detail.value?.durationSec || 0))
+  const durationSnapshot = Math.max(fromPayloadDuration, fromDetailDuration, latest)
+
+  void syncProgress(latest, {
+    durationSecSnapshot: durationSnapshot > 0 ? durationSnapshot : undefined,
+  })
 }
 
 type SyncProgressOptions = {
@@ -286,7 +301,7 @@ async function syncProgress(seconds: number, options: SyncProgressOptions = {}) 
   try {
     await updateMyVideoProgress(videoId.value, safeSeconds, safeDurationSnapshot)
     lastSyncedProgressSec.value = safeSeconds
-    latestObservedProgressSec.value = Math.max(latestObservedProgressSec.value, safeSeconds)
+    latestObservedProgressSec.value = safeSeconds
   } catch (_err) {
     // 进度回写失败不阻断播放
   }
