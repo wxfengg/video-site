@@ -4,19 +4,24 @@ import com.videosite.backend.ab.dto.AbAssignmentResponse;
 import com.videosite.backend.ab.dto.AbCtrReportResponse;
 import com.videosite.backend.ab.dto.AbExperimentResponse;
 import com.videosite.backend.ab.dto.AbExperimentSaveRequest;
+import com.videosite.backend.ab.dto.AbVariantCoverUploadResponse;
 import com.videosite.backend.ab.service.AbExperimentService;
 import com.videosite.backend.ab.service.AbReportService;
 import com.videosite.backend.common.api.ApiResponse;
 import com.videosite.backend.common.auth.AuthConstants;
+import org.springframework.http.MediaType;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
@@ -59,6 +64,16 @@ public class AbExperimentController {
     @PostMapping("/api/admin/ab/experiments/{experimentId}/stop")
     public ApiResponse<AbExperimentResponse> stop(@PathVariable("experimentId") Long experimentId) {
         return ApiResponse.success(abExperimentService.stopExperiment(experimentId));
+    }
+
+    @DeleteMapping("/api/admin/ab/experiments/{experimentId}")
+    public ApiResponse<String> delete(@PathVariable("experimentId") Long experimentId) {
+        return ApiResponse.success(abExperimentService.deleteExperiment(experimentId));
+    }
+
+    @PostMapping(value = "/api/admin/ab/variants/cover/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<AbVariantCoverUploadResponse> uploadVariantCover(@RequestPart("file") MultipartFile file) {
+        return ApiResponse.success(abExperimentService.uploadVariantCover(file));
     }
 
     @GetMapping("/api/admin/ab/experiments/{experimentId}/ctr-report")

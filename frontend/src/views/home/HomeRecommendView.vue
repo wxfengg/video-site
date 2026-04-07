@@ -100,6 +100,7 @@ import { ref, onMounted, watch } from "vue"
 import { useRouter } from "vue-router"
 import { ElMessage } from "element-plus"
 import VideoCard from "../../components/video/VideoCard.vue"
+import { getAbAssignment, type AbAssignmentResponse } from "../../apis/ab"
 import {
   getHotRank,
   getHomeRecommendations,
@@ -108,7 +109,7 @@ import {
   type VideoHotRankItem,
   type VideoListItem,
 } from "../../apis/video"
-import { trackClick, trackExposure } from "../../utils/tracking"
+import { trackEvent } from "../../utils/tracking"
 import { getOrCreateVisitorId } from "../../utils/visitor"
 
 const router = useRouter()
@@ -122,6 +123,7 @@ const visitorId = ref(getOrCreateVisitorId())
 const hotWindowType = ref<"24h" | "7d">("24h")
 const hotVideos = ref<VideoHotRankItem[]>([])
 const hotLoading = ref(false)
+const homeAbAssignments = ref<Map<string, AbAssignmentResponse>>(new Map())
 
 onMounted(async () => {
   await Promise.all([reload(), reloadHotRank()])
@@ -135,6 +137,8 @@ async function reload() {
   loading.value = true
   try {
     const trimmedKeyword = keyword.value.trim()
+    let nextVideos: VideoListItem[] = []
+    let nextTotal = 0
 
     if (!trimmedKeyword && page.value === 1) {
       const preloadSize = Math.max(200, pageSize * 10)
@@ -153,20 +157,32 @@ async function reload() {
         const selectedIds = new Set(recommendedRecords.map((item) => String(item.id)))
         const fallbackRecords = allRecords.filter((item) => !selectedIds.has(String(item.id)))
 
-        videos.value = [...recommendedRecords, ...fallbackRecords].slice(0, pageSize)
+        nextVideos = [...recommendedRecords, ...fallbackRecords].slice(0, pageSize)
       } else {
-        videos.value = allRecords.slice(0, pageSize)
+        nextVideos = allRecords.slice(0, pageSize)
       }
 
-      total.value = Number(all.total || videos.value.length)
+      nextTotal = Number(all.total || nextVideos.length)
     } else {
       const data = await getPublicVideos(page.value, pageSize, trimmedKeyword)
-      videos.value = data.records || []
-      total.value = Number(data.total || 0)
+      nextVideos = data.records || []
+      nextTotal = Number(data.total || 0)
     }
 
+    const assignmentMap = await loadHomeAbAssignments(nextVideos)
+    homeAbAssignments.value = assignmentMap
+    videos.value = applyCoverVariants(nextVideos, assignmentMap)
+    total.value = nextTotal
+
     videos.value.forEach((item, index) => {
-      trackExposure(item.id, { scene: "home", rank: index + 1 })
+      const assignment = assignmentMap.get(String(item.id))
+      trackEvent({
+        eventType: "exposure",
+        videoId: item.id,
+        abExperimentId: assignment?.experimentId,
+        abVariant: assignment?.variantCode,
+        extra: { scene: "home", rank: index + 1 },
+      })
       void sendRecommendFeedback(item.id, "exposure", "home")
     })
   } catch (_err) {
@@ -186,9 +202,13 @@ async function reloadHotRank() {
   try {
     hotVideos.value = await getHotRank(hotWindowType.value, 10)
     hotVideos.value.forEach((item, index) => {
-      trackExposure(item.videoId, {
-        scene: `hot_rank_${hotWindowType.value}`,
-        rank: index + 1,
+      trackEvent({
+        eventType: "exposure",
+        videoId: item.videoId,
+        extra: {
+          scene: `hot_rank_${hotWindowType.value}`,
+          rank: index + 1,
+        },
       })
     })
   } catch (_err) {
@@ -213,9 +233,53 @@ function formatDateTime(value: string | null | undefined) {
 }
 
 async function openDetail(id: number | string, scene = "home") {
-  trackClick(id, { scene })
+  const assignment = scene === "home" ? homeAbAssignments.value.get(String(id)) : undefined
+  trackEvent({
+    eventType: "click",
+    videoId: id,
+    abExperimentId: assignment?.experimentId,
+    abVariant: assignment?.variantCode,
+    extra: { scene },
+  })
   void sendRecommendFeedback(id, "click", scene)
   await router.push(`/videos/${id}`)
+}
+
+async function loadHomeAbAssignments(videoList: VideoListItem[]) {
+  const map = new Map<string, AbAssignmentResponse>()
+  const ids = Array.from(new Set(videoList.map((item) => String(item.id))))
+  if (ids.length === 0) {
+    return map
+  }
+
+  const assignments = await Promise.all(
+    ids.map(async (id) => {
+      const assignment = await getAbAssignment("home_cover", id)
+      return [id, assignment] as const
+    }),
+  )
+
+  for (const [id, assignment] of assignments) {
+    if (assignment) {
+      map.set(id, assignment)
+    }
+  }
+
+  return map
+}
+
+function applyCoverVariants(videoList: VideoListItem[], assignmentMap: Map<string, AbAssignmentResponse>) {
+  return videoList.map((item) => {
+    const assignment = assignmentMap.get(String(item.id))
+    if (!assignment?.coverUrl) {
+      return item
+    }
+
+    return {
+      ...item,
+      coverUrl: assignment.coverUrl,
+    }
+  })
 }
 </script>
 

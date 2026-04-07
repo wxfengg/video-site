@@ -30,12 +30,20 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="300" fixed="right">
+      <el-table-column label="操作" width="380" fixed="right">
         <template #default="scope">
           <el-space>
             <el-button size="small" @click="openEdit(scope.row)">编辑</el-button>
             <el-button size="small" type="success" @click="onStart(scope.row.id)">启动</el-button>
             <el-button size="small" type="warning" @click="onStop(scope.row.id)">停止</el-button>
+            <el-button
+              size="small"
+              type="danger"
+              :disabled="scope.row.status !== 'stopped'"
+              @click="onDelete(scope.row)"
+            >
+              删除
+            </el-button>
           </el-space>
         </template>
       </el-table-column>
@@ -78,7 +86,31 @@
       <el-divider>变体配置</el-divider>
       <div v-for="(variant, index) in form.variants" :key="index" class="variant-row">
         <el-input v-model="variant.variantCode" placeholder="变体编码（A/B）" style="width: 120px" />
-        <el-input v-model="variant.coverUrl" placeholder="封面 URL（可选）" style="width: 260px" />
+        <div class="variant-cover-editor">
+          <ImageUploadSelector
+            v-model="variant.coverFile"
+            @update:modelValue="onVariantCoverFileChange(variant, $event)"
+            :preview-url="variant.coverUrl"
+            button-text="选择封面图"
+            preview-alt="变体封面预览"
+            :show-tip="false"
+            :disabled="variant.coverUploading || submitting"
+          />
+          <div class="variant-cover-actions">
+            <span class="upload-status" :class="`is-${variant.coverStatus}`">
+              <i class="status-dot"></i>
+              <span class="status-text">{{ resolveCoverStatusText(variant) }}</span>
+            </span>
+            <el-button
+              size="small"
+              text
+              :disabled="(!variant.coverUrl && !variant.coverFile) || submitting || variant.coverUploading"
+              @click="clearVariantCover(variant)"
+            >
+              清空
+            </el-button>
+          </div>
+        </div>
         <el-input-number v-model="variant.trafficRatio" :min="1" :max="100" style="width: 120px" />
         <el-button text type="danger" @click="removeVariant(index)">删除</el-button>
       </div>
@@ -89,23 +121,50 @@
 
     <template #footer>
       <el-button @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" @click="submit">保存</el-button>
+      <el-button type="primary" :loading="submitting" @click="submit">保存</el-button>
     </template>
   </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue"
-import { ElMessage } from "element-plus"
+import { ElMessage, ElMessageBox } from "element-plus"
+import ImageUploadSelector from "../../components/image/ImageUploadSelector.vue"
 import { getAdminVideos } from "../../apis/video"
 import {
   createAbExperiment,
+  deleteAbExperiment,
   listAbExperiments,
   startAbExperiment,
   stopAbExperiment,
   updateAbExperiment,
+  uploadAbVariantCover,
   type AbExperiment,
 } from "../../apis/ab"
+
+interface AbVariantFormItem {
+  variantCode: string
+  coverUrl: string
+  trafficRatio: number
+  coverFile: File | null
+  coverUploading: boolean
+  coverStatus: "idle" | "uploading" | "success" | "error"
+}
+
+function buildVariantFormItem(variantCode: string, coverUrl: string, trafficRatio: number): AbVariantFormItem {
+  return {
+    variantCode,
+    coverUrl,
+    trafficRatio,
+    coverFile: null,
+    coverUploading: false,
+    coverStatus: coverUrl ? "success" : "idle",
+  }
+}
+
+function defaultVariants() {
+  return [buildVariantFormItem("A", "", 50), buildVariantFormItem("B", "", 50)]
+}
 
 const loading = ref(false)
 const rows = ref<AbExperiment[]>([])
@@ -115,6 +174,7 @@ const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
 const videoOptionsLoading = ref(false)
 const videoOptions = ref<Array<{ value: string; label: string }>>([])
+const submitting = ref(false)
 
 const total = computed(() => rows.value.length)
 const pagedRows = computed(() => {
@@ -131,10 +191,7 @@ const form = reactive({
   scene: "home_cover",
   targetVideoId: "",
   metricPrimary: "ctr",
-  variants: [
-    { variantCode: "A", coverUrl: "", trafficRatio: 50 },
-    { variantCode: "B", coverUrl: "", trafficRatio: 50 },
-  ],
+  variants: defaultVariants() as AbVariantFormItem[],
 })
 
 onMounted(async () => {
@@ -165,10 +222,7 @@ function resetForm() {
   form.scene = "home_cover"
   form.targetVideoId = videoOptions.value[0]?.value || ""
   form.metricPrimary = "ctr"
-  form.variants = [
-    { variantCode: "A", coverUrl: "", trafficRatio: 50 },
-    { variantCode: "B", coverUrl: "", trafficRatio: 50 },
-  ]
+  form.variants = defaultVariants()
 }
 
 function openCreate() {
@@ -183,20 +237,12 @@ function openEdit(item: AbExperiment) {
   form.scene = item.scene
   form.targetVideoId = String(item.targetVideoId)
   form.metricPrimary = item.metricPrimary
-  form.variants = item.variants.map((v) => ({
-    variantCode: v.variantCode,
-    coverUrl: v.coverUrl || "",
-    trafficRatio: v.trafficRatio,
-  }))
+  form.variants = item.variants.map((v) => buildVariantFormItem(v.variantCode, v.coverUrl || "", v.trafficRatio))
   dialogVisible.value = true
 }
 
 function addVariant() {
-  form.variants.push({
-    variantCode: `V${form.variants.length + 1}`,
-    coverUrl: "",
-    trafficRatio: 10,
-  })
+  form.variants.push(buildVariantFormItem(`V${form.variants.length + 1}`, "", 10))
 }
 
 function removeVariant(index: number) {
@@ -204,8 +250,27 @@ function removeVariant(index: number) {
 }
 
 async function submit() {
+  if (submitting.value) {
+    return
+  }
+
+  if (form.variants.some((item) => item.coverUploading)) {
+    ElMessage.warning("封面上传中，请稍后再保存")
+    return
+  }
+
   if (!form.targetVideoId) {
     ElMessage.warning("请选择目标视频")
+    return
+  }
+
+  if (!editingId.value && form.variants.some((item) => !item.coverUrl || !item.coverUrl.trim())) {
+    ElMessage.warning("新建实验时每个变体都必须上传封面图")
+    return
+  }
+
+  if (form.variants.some((item) => item.coverFile)) {
+    ElMessage.warning("检测到待处理封面，请稍后重试")
     return
   }
 
@@ -215,6 +280,7 @@ async function submit() {
     return
   }
 
+  submitting.value = true
   try {
     const payload = {
       name: form.name,
@@ -240,7 +306,61 @@ async function submit() {
     await reload()
   } catch (_err) {
     ElMessage.error("保存实验失败")
+  } finally {
+    submitting.value = false
   }
+}
+
+async function onVariantCoverFileChange(variant: AbVariantFormItem, file: File | null) {
+  variant.coverFile = file
+  if (!file) {
+    variant.coverStatus = variant.coverUrl ? "success" : "idle"
+    return
+  }
+
+  await uploadVariantCover(variant)
+}
+
+async function uploadVariantCover(variant: AbVariantFormItem) {
+  if (!variant.coverFile || variant.coverUploading) {
+    return
+  }
+
+  variant.coverUploading = true
+  variant.coverStatus = "uploading"
+  try {
+    const result = await uploadAbVariantCover(variant.coverFile)
+    variant.coverUrl = result.coverUrl
+    variant.coverFile = null
+    variant.coverStatus = "success"
+    ElMessage.success("变体封面上传成功")
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "变体封面上传失败"
+    ElMessage.error(message)
+    variant.coverFile = null
+    variant.coverStatus = "error"
+  } finally {
+    variant.coverUploading = false
+  }
+}
+
+function clearVariantCover(variant: AbVariantFormItem) {
+  variant.coverFile = null
+  variant.coverUrl = ""
+  variant.coverStatus = "idle"
+}
+
+function resolveCoverStatusText(variant: AbVariantFormItem) {
+  if (variant.coverStatus === "uploading") {
+    return "上传中"
+  }
+  if (variant.coverStatus === "success") {
+    return "上传成功"
+  }
+  if (variant.coverStatus === "error") {
+    return "上传失败"
+  }
+  return "未上传"
 }
 
 async function onStart(experimentId: number) {
@@ -260,6 +380,32 @@ async function onStop(experimentId: number) {
     await reload()
   } catch (_err) {
     ElMessage.error("停止失败")
+  }
+}
+
+async function onDelete(item: AbExperiment) {
+  if (item.status !== "stopped") {
+    ElMessage.warning("仅支持删除已停止实验")
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(`确认删除实验「${item.name}」吗？将同步删除变体、分流记录与实验事件数据。`, "删除实验", {
+      type: "warning",
+      confirmButtonText: "删除",
+      cancelButtonText: "取消",
+    })
+  } catch (_err) {
+    return
+  }
+
+  try {
+    await deleteAbExperiment(item.id)
+    ElMessage.success("实验及相关数据已删除")
+    await reload()
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "删除失败"
+    ElMessage.error(message)
   }
 }
 
@@ -304,9 +450,61 @@ function resolveVideoTitle(videoId: number | string) {
 
 .variant-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 10px;
+}
+
+.variant-cover-editor {
+  width: 320px;
+}
+
+.variant-cover-actions {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.upload-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  background: #c0c4cc;
+}
+
+.upload-status.is-uploading {
+  color: #409eff;
+}
+
+.upload-status.is-uploading .status-dot {
+  background: #409eff;
+}
+
+.upload-status.is-success {
+  color: #67c23a;
+}
+
+.upload-status.is-success .status-dot {
+  background: #67c23a;
+}
+
+.upload-status.is-error {
+  color: #f56c6c;
+}
+
+.upload-status.is-error .status-dot {
+  background: #f56c6c;
 }
 
 .pager-wrap {

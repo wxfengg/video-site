@@ -4,30 +4,48 @@ import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.videosite.backend.ab.dto.AbAssignmentResponse;
 import com.videosite.backend.ab.dto.AbExperimentResponse;
 import com.videosite.backend.ab.dto.AbExperimentSaveRequest;
+import com.videosite.backend.ab.dto.AbVariantCoverUploadResponse;
 import com.videosite.backend.ab.dto.AbVariantRequest;
 import com.videosite.backend.ab.dto.AbVariantResponse;
 import com.videosite.backend.common.api.ErrorCode;
 import com.videosite.backend.common.exception.BusinessException;
+import com.videosite.backend.storage.StorageService;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.InputStream;
+import java.time.LocalDate;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class AbExperimentService {
 
-    private final JdbcTemplate jdbcTemplate;
+    private static final long MAX_COVER_SIZE_BYTES = 5L * 1024 * 1024;
+    private static final Set<String> ALLOWED_COVER_MIME_TYPES = Set.of(
+            "image/jpeg",
+            "image/jpg",
+            "image/png",
+            "image/webp"
+    );
 
-    public AbExperimentService(JdbcTemplate jdbcTemplate) {
+    private final JdbcTemplate jdbcTemplate;
+    private final StorageService storageService;
+
+    public AbExperimentService(JdbcTemplate jdbcTemplate,
+                               StorageService storageService) {
         this.jdbcTemplate = jdbcTemplate;
+        this.storageService = storageService;
     }
 
     public List<AbExperimentResponse> listExperiments() {
@@ -56,6 +74,7 @@ public class AbExperimentService {
     @Transactional(rollbackFor = Exception.class)
     public AbExperimentResponse createExperiment(AbExperimentSaveRequest request) {
         validateRatios(request.getVariants());
+        validateRequiredVariantCovers(request.getVariants());
 
         Long experimentId = IdWorker.getId();
         jdbcTemplate.update(
@@ -113,6 +132,38 @@ public class AbExperimentService {
                 experimentId
         );
         return findById(experimentId);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public String deleteExperiment(Long experimentId) {
+        String status = getExperimentStatus(experimentId);
+        if (!"stopped".equalsIgnoreCase(status)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "仅支持删除已停止实验");
+        }
+
+        jdbcTemplate.update("DELETE FROM event_log WHERE ab_experiment_id = ?", experimentId);
+        jdbcTemplate.update("DELETE FROM ab_assignment WHERE experiment_id = ?", experimentId);
+        jdbcTemplate.update("DELETE FROM ab_variant WHERE experiment_id = ?", experimentId);
+        jdbcTemplate.update("DELETE FROM ab_experiment WHERE id = ?", experimentId);
+
+        return "deleted";
+    }
+
+    public AbVariantCoverUploadResponse uploadVariantCover(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "封面文件不能为空");
+        }
+
+        validateCoverFile(file);
+        String objectKey = buildAbCoverObjectKey(file.getOriginalFilename(), file.getContentType());
+        try (InputStream inputStream = file.getInputStream()) {
+            storageService.put(objectKey, inputStream, file.getSize(), file.getContentType());
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.UPLOAD_FAILED, "变体封面上传失败");
+        }
+
+        String coverUrl = storageService.getUploadUrl(objectKey);
+        return new AbVariantCoverUploadResponse(objectKey, coverUrl);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -216,6 +267,22 @@ public class AbExperimentService {
         }
     }
 
+    private String getExperimentStatus(Long experimentId) {
+        try {
+            String status = jdbcTemplate.queryForObject(
+                    "SELECT status FROM ab_experiment WHERE id = ? LIMIT 1",
+                    String.class,
+                    experimentId
+            );
+            if (!StringUtils.hasText(status)) {
+                throw new BusinessException(ErrorCode.NOT_FOUND, "实验不存在");
+            }
+            return status;
+        } catch (EmptyResultDataAccessException ex) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "实验不存在");
+        }
+    }
+
     private void validateRatios(List<AbVariantRequest> variants) {
         int sum = 0;
         List<String> seen = new ArrayList<>();
@@ -232,6 +299,14 @@ public class AbExperimentService {
         }
     }
 
+    private void validateRequiredVariantCovers(List<AbVariantRequest> variants) {
+        for (AbVariantRequest variant : variants) {
+            if (!StringUtils.hasText(variant.getCoverUrl())) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "新建实验时每个变体都必须配置封面图");
+            }
+        }
+    }
+
     private Timestamp parseTimestamp(String value) {
         if (!StringUtils.hasText(value)) {
             return null;
@@ -245,6 +320,69 @@ public class AbExperimentService {
 
     private String toText(Timestamp timestamp) {
         return timestamp == null ? null : timestamp.toLocalDateTime().toString();
+    }
+
+    private String buildAbCoverObjectKey(String fileName, String contentType) {
+        String datePart = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
+        String ext = extractImageExtension(fileName, contentType);
+        return "images/covers/ab/" + datePart + "/" + IdWorker.getId() + ext;
+    }
+
+    private String extractImageExtension(String fileName, String contentType) {
+        if (StringUtils.hasText(contentType)) {
+            if ("image/png".equalsIgnoreCase(contentType)) {
+                return ".png";
+            }
+            if ("image/webp".equalsIgnoreCase(contentType)) {
+                return ".webp";
+            }
+            if ("image/jpeg".equalsIgnoreCase(contentType) || "image/jpg".equalsIgnoreCase(contentType)) {
+                return ".jpg";
+            }
+        }
+
+        if (StringUtils.hasText(fileName)) {
+            String lowerName = fileName.toLowerCase();
+            if (lowerName.endsWith(".png")) {
+                return ".png";
+            }
+            if (lowerName.endsWith(".webp")) {
+                return ".webp";
+            }
+            if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) {
+                return ".jpg";
+            }
+        }
+
+        return ".jpg";
+    }
+
+    private void validateCoverFile(MultipartFile file) {
+        if (file.getSize() > MAX_COVER_SIZE_BYTES) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "封面图片不能超过 5MB");
+        }
+
+        String contentType = file.getContentType();
+        if (StringUtils.hasText(contentType)) {
+            if (!ALLOWED_COVER_MIME_TYPES.contains(contentType.toLowerCase())) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "封面仅支持 jpg/jpeg、png、webp 格式");
+            }
+            return;
+        }
+
+        String originalFilename = file.getOriginalFilename();
+        if (!StringUtils.hasText(originalFilename)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "封面仅支持 jpg/jpeg、png、webp 格式");
+        }
+
+        String lowerName = originalFilename.toLowerCase();
+        boolean ok = lowerName.endsWith(".jpg")
+                || lowerName.endsWith(".jpeg")
+                || lowerName.endsWith(".png")
+                || lowerName.endsWith(".webp");
+        if (!ok) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "封面仅支持 jpg/jpeg、png、webp 格式");
+        }
     }
 
     private ExperimentRow findRunningExperiment(String scene, Long targetVideoId) {
