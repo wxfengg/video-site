@@ -12,8 +12,8 @@ spring:
       max-request-size: ${UPLOAD_MAX_REQUEST_SIZE:1024MB}
   datasource:
     url: jdbc:mysql://${DB_HOST:127.0.0.1}:${DB_PORT:3306}/${DB_NAME:video_site}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
-    username: ${DB_USER:root}
-    password: ${DB_PASSWORD:}
+    username: root
+    password: root
     driver-class-name: com.mysql.cj.jdbc.Driver
   flyway:
     enabled: ${FLYWAY_ENABLED:false}
@@ -37,7 +37,7 @@ app:
   storage:
     local-root: ${LOCAL_STORAGE_ROOT:../}
   transcode:
-    ffmpeg-bin: ${FFMPEG_BIN:ffmpeg}
+    ffmpeg-bin: ffmpeg.exe
     worker-cron: ${TRANSCODE_WORKER_CRON:0/10 * * * * ?}
     batch-size: ${TRANSCODE_WORKER_BATCH_SIZE:1}
     max-retry: ${TRANSCODE_MAX_RETRY:3}
