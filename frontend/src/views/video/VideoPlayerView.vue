@@ -43,6 +43,59 @@
 
         <p class="desc">{{ detail?.description || "暂无简介" }}</p>
 
+        <!-- AI 智能摘要 -->
+        <el-card
+          v-if="detail?.aiSummary"
+          class="ai-card"
+          shadow="never"
+        >
+          <template #header>
+            <div class="ai-header">
+              <span class="ai-icon">AI</span>
+              <span>视频智能摘要</span>
+            </div>
+          </template>
+          <p class="ai-summary">{{ detail.aiSummary }}</p>
+          <div v-if="detail.aiTags?.length" class="ai-tags">
+            <el-tag
+              v-for="tag in detail.aiTags"
+              :key="tag"
+              size="small"
+              effect="plain"
+              class="ai-tag"
+            >{{ tag }}</el-tag>
+          </div>
+        </el-card>
+
+        <!-- AI 分析中提示 -->
+        <el-card
+          v-else-if="detail && ['ready', 'published'].includes(detail.status)"
+          class="ai-card ai-analyzing"
+          shadow="never"
+        >
+          <template #header>
+            <div class="ai-header">
+              <div class="ai-header-left">
+                <span class="ai-icon">AI</span>
+                <span>视频智能摘要</span>
+              </div>
+              <el-button
+                size="small"
+                text
+                type="primary"
+                :loading="aiRefreshing"
+                @click="refreshAiSummary"
+              >
+                刷新状态
+              </el-button>
+            </div>
+          </template>
+          <div class="ai-analyzing-body">
+            <el-icon class="analyzing-icon"><Loading /></el-icon>
+            <p>AI 正在智能分析视频内容，分析完成后将自动显示结果</p>
+          </div>
+        </el-card>
+
         <el-divider />
 
         <section class="comments">
@@ -76,19 +129,27 @@
               <div class="comment-main">
                 <div class="comment-meta">
                   <strong>{{ item.username }}</strong>
+                  <el-tag v-if="item.pinned" size="small" type="danger">置顶</el-tag>
                   <span>{{ formatDateTime(item.createdAt) }}</span>
                 </div>
                 <p>{{ item.content }}</p>
               </div>
-              <el-button
+              <div
                 v-if="userLoggedIn && currentUserId !== null && String(item.userId) === String(currentUserId)"
-                size="small"
-                text
-                type="danger"
-                @click="onDeleteComment(item.id)"
+                class="comment-actions"
               >
-                删除
-              </el-button>
+                <el-button
+                  size="small"
+                  text
+                  :type="item.pinned ? 'info' : 'primary'"
+                  @click="onTogglePinComment(item)"
+                >
+                  {{ item.pinned ? "取消置顶" : "置顶" }}
+                </el-button>
+                <el-button size="small" text type="danger" @click="onDeleteComment(item.id)">
+                  删除
+                </el-button>
+              </div>
             </li>
           </ul>
 
@@ -108,9 +169,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue"
+import { computed, onMounted, onUnmounted, ref } from "vue"
 import { useRoute } from "vue-router"
 import { ElMessage } from "element-plus"
+import { Loading } from "@element-plus/icons-vue"
 import {
   addVideoLike,
   createVideoComment,
@@ -119,7 +181,9 @@ import {
   getVideoDetail,
   getVideoLikeSummary,
   getVideoPlaySources,
+  pinVideoComment,
   removeVideoLike,
+  unpinVideoComment,
   type VideoCommentItem,
   type VideoDetail,
   type VideoLikeSummary,
@@ -149,6 +213,8 @@ const commentsPageSize = 10
 const commentsTotal = ref(0)
 const commentSubmitting = ref(false)
 const commentContent = ref("")
+const aiPollingTimer = ref<ReturnType<typeof setInterval> | null>(null)
+const aiRefreshing = ref(false)
 
 const qualityOptions = [
   { label: "自动", value: "auto" },
@@ -187,12 +253,53 @@ onMounted(async () => {
     }
 
     await Promise.all([loadLikeSummary(), loadComments()])
+
+    // 如果 AI 尚未分析完成，启动自动轮询
+    if (detail.value && !detail.value.aiSummary && ['ready', 'published'].includes(detail.value.status)) {
+      startAiPolling()
+    }
   } catch (_err) {
     ElMessage.error("加载播放页失败，请稍后再试")
   } finally {
     loading.value = false
   }
 })
+
+onUnmounted(() => {
+  stopAiPolling()
+})
+
+function startAiPolling() {
+  stopAiPolling()
+  aiPollingTimer.value = setInterval(() => {
+    void refreshAiSummary()
+  }, 8000)
+}
+
+function stopAiPolling() {
+  if (aiPollingTimer.value) {
+    clearInterval(aiPollingTimer.value)
+    aiPollingTimer.value = null
+  }
+}
+
+async function refreshAiSummary() {
+  if (!videoId.value || aiRefreshing.value) {
+    return
+  }
+  aiRefreshing.value = true
+  try {
+    const data = await getVideoDetail(videoId.value)
+    if (data.aiSummary) {
+      detail.value = { ...detail.value!, ...data }
+      stopAiPolling()
+    }
+  } catch (_err) {
+    // 轮询失败静默处理
+  } finally {
+    aiRefreshing.value = false
+  }
+}
 
 function onPlay() {
   if (videoId.value === null) {
@@ -422,6 +529,25 @@ async function onDeleteComment(commentId: number | string) {
   }
 }
 
+async function onTogglePinComment(item: VideoCommentItem) {
+  if (!userLoggedIn.value || videoId.value === null) {
+    return
+  }
+
+  try {
+    if (item.pinned) {
+      await unpinVideoComment(videoId.value, item.id)
+      ElMessage.success("已取消置顶")
+    } else {
+      await pinVideoComment(videoId.value, item.id)
+      ElMessage.success("置顶成功")
+    }
+    await loadComments()
+  } catch (_err) {
+    ElMessage.error("置顶操作失败")
+  }
+}
+
 function formatDateTime(value: string | null) {
   if (!value) {
     return "-"
@@ -544,6 +670,92 @@ function formatDateTime(value: string | null) {
   margin: 6px 0 0;
   line-height: 1.7;
   word-break: break-word;
+}
+
+.comment-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.ai-card {
+  margin-top: 16px;
+  background: linear-gradient(135deg, #f8faff 0%, #f0f4ff 100%);
+  border: 1px solid rgba(180, 195, 240, 0.5);
+  border-radius: 12px;
+}
+
+.ai-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+  color: #3a4f9f;
+}
+
+.ai-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #4f78ff, #7456f6);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ai-summary {
+  margin: 0;
+  line-height: 1.7;
+  color: #4a5578;
+}
+
+.ai-tags {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-tag {
+  border-radius: 999px;
+}
+
+.ai-analyzing {
+  opacity: 0.85;
+}
+
+.ai-analyzing-body {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #7d8a9f;
+  font-size: 14px;
+}
+
+.analyzing-icon {
+  animation: spin 1.5s linear infinite;
+  font-size: 18px;
+  color: #4f78ff;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .pager-wrap {

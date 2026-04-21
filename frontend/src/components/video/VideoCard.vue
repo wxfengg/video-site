@@ -13,6 +13,11 @@
       <div v-else class="cover placeholder" aria-hidden="true">No Cover</div>
     </div>
     <div class="content">
+      <div v-if="video.recommendReason" class="rec-reason">
+        <el-tag size="small" type="warning" effect="light" class="rec-tag"
+          ><span class="rec-ai">AI</span>{{ video.recommendReason }}</el-tag
+        >
+      </div>
       <h3 class="title">{{ video.title }}</h3>
       <div class="meta">
         <span class="status-pill">{{ mapStatus(video.status) }}</span>
@@ -133,6 +138,33 @@ void props
   background: rgba(78, 124, 255, 0.12);
   color: #4f6ed6;
   font-weight: 600;
+}
+
+.rec-reason {
+  margin-bottom: 6px;
+}
+
+.rec-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: linear-gradient(135deg, #fff7e6 0%, #ffe8cc 100%);
+  border-color: rgba(255, 166, 0, 0.35);
+  color: #d46b08;
+  font-weight: 600;
+}
+
+.rec-ai {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: linear-gradient(135deg, #ff9c6e, #ff7875);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .publish-time {

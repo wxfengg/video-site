@@ -36,7 +36,7 @@
       <el-table-column prop="id" label="ID" width="160" />
       <el-table-column prop="title" label="标题" min-width="180" />
       <el-table-column prop="status" label="状态" width="120" />
-      <el-table-column label="操作" width="420" fixed="right">
+      <el-table-column label="操作" width="480" fixed="right">
         <template #default="scope">
           <el-space>
             <el-button size="small" @click="openEdit(scope.row)">编辑</el-button>
@@ -53,6 +53,7 @@
               删除
             </el-button>
             <el-button size="small" @click="openPlayer(scope.row)">预览</el-button>
+            <el-button size="small" @click="openComments(scope.row)">评论</el-button>
           </el-space>
         </template>
       </el-table-column>
@@ -104,6 +105,38 @@
       <el-button type="primary" @click="submitEdit">保存</el-button>
     </template>
   </el-dialog>
+
+  <el-dialog v-model="commentsVisible" title="视频评论管理" width="720px">
+    <el-table :data="commentsRows" v-loading="commentsLoading" border size="small">
+      <el-table-column prop="username" label="用户" width="140" />
+      <el-table-column label="时间" width="160">
+        <template #default="scope">{{ formatDateTime(scope.row.createdAt) }}</template>
+      </el-table-column>
+      <el-table-column prop="content" label="内容" min-width="200" show-overflow-tooltip />
+      <el-table-column label="操作" width="160" fixed="right">
+        <template #default="scope">
+          <el-button
+            size="small"
+            text
+            :type="scope.row.pinned ? 'info' : 'primary'"
+            @click="onTogglePinComment(scope.row)"
+          >
+            {{ scope.row.pinned ? "取消置顶" : "置顶" }}
+          </el-button>
+          <el-button size="small" type="danger" text @click="onDeleteComment(scope.row.id)">删除</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+    <div class="pager-wrap">
+      <el-pagination
+        layout="total, prev, pager, next"
+        :total="commentsTotal"
+        :page-size="commentsPageSize"
+        :current-page="commentsPage"
+        @current-change="onCommentsPageChange"
+      />
+    </div>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
@@ -112,13 +145,18 @@ import { useRouter } from "vue-router"
 import { ElMessage, ElMessageBox } from "element-plus"
 import ImageUploadSelector from "../../components/image/ImageUploadSelector.vue"
 import {
+  deleteAdminVideoComment,
   deleteVideo,
   getAdminVideo,
+  getAdminVideoComments,
   getAdminVideos,
+  pinAdminVideoComment,
   publishVideo,
   unpublishVideo,
+  unpinAdminVideoComment,
   updateVideo,
   uploadCoverImage,
+  type VideoCommentItem,
   type VideoListItem,
 } from "../../apis/video"
 
@@ -145,6 +183,14 @@ const editForm = reactive({
   description: "",
   coverUrl: "",
 })
+
+const commentsVisible = ref(false)
+const commentsVideoId = ref<string | number | null>(null)
+const commentsLoading = ref(false)
+const commentsRows = ref<VideoCommentItem[]>([])
+const commentsPage = ref(1)
+const commentsPageSize = ref(10)
+const commentsTotal = ref(0)
 
 onMounted(async () => {
   await reload()
@@ -290,6 +336,84 @@ async function openPlayer(row: VideoListItem) {
     return
   }
   await router.push(`/videos/${row.id}`)
+}
+
+async function openComments(row: VideoListItem) {
+  commentsVideoId.value = row.id
+  commentsPage.value = 1
+  commentsPageSize.value = 10
+  commentsVisible.value = true
+  await loadComments()
+}
+
+async function loadComments() {
+  if (!commentsVideoId.value) return
+  commentsLoading.value = true
+  try {
+    const result = await getAdminVideoComments(commentsVideoId.value, commentsPage.value, commentsPageSize.value)
+    commentsRows.value = result.records || []
+    commentsTotal.value = Number(result.total || 0)
+  } catch (_err) {
+    ElMessage.error("加载评论失败")
+    commentsRows.value = []
+    commentsTotal.value = 0
+  } finally {
+    commentsLoading.value = false
+  }
+}
+
+async function onCommentsPageChange(nextPage: number) {
+  commentsPage.value = nextPage
+  await loadComments()
+}
+
+async function onTogglePinComment(row: VideoCommentItem) {
+  if (!commentsVideoId.value) return
+  try {
+    if (row.pinned) {
+      await unpinAdminVideoComment(commentsVideoId.value, row.id)
+      ElMessage.success("已取消置顶")
+    } else {
+      await pinAdminVideoComment(commentsVideoId.value, row.id)
+      ElMessage.success("置顶成功")
+    }
+    await loadComments()
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "操作失败"
+    ElMessage.error(message)
+  }
+}
+
+async function onDeleteComment(commentId: number | string) {
+  if (!commentsVideoId.value) return
+  try {
+    await ElMessageBox.confirm("确认删除该评论吗？此操作不可恢复。", "删除确认", {
+      type: "warning",
+      confirmButtonText: "删除",
+      cancelButtonText: "取消",
+    })
+  } catch (_err) {
+    return
+  }
+  try {
+    await deleteAdminVideoComment(commentsVideoId.value, commentId)
+    ElMessage.success("删除成功")
+    await loadComments()
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "删除失败"
+    ElMessage.error(message)
+  }
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) return "-"
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value))
 }
 </script>
 

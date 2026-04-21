@@ -3,10 +3,12 @@ package com.videosite.backend.video.controller;
 import com.videosite.backend.common.api.ApiResponse;
 import com.videosite.backend.video.dto.PageResult;
 import com.videosite.backend.video.dto.ExternalVideoCreateRequest;
+import com.videosite.backend.video.dto.VideoCommentItemResponse;
 import com.videosite.backend.video.dto.VideoDetailResponse;
 import com.videosite.backend.video.dto.VideoListItemResponse;
 import com.videosite.backend.video.dto.VideoPlaySourcesResponse;
 import com.videosite.backend.video.dto.VideoUpdateRequest;
+import com.videosite.backend.video.service.VideoInteractionService;
 import com.videosite.backend.video.service.VideoService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.validation.annotation.Validated;
@@ -26,9 +28,11 @@ import javax.validation.Valid;
 public class VideoController {
 
     private final VideoService videoService;
+    private final VideoInteractionService videoInteractionService;
 
-    public VideoController(VideoService videoService) {
+    public VideoController(VideoService videoService, VideoInteractionService videoInteractionService) {
         this.videoService = videoService;
+        this.videoInteractionService = videoInteractionService;
     }
 
     @GetMapping("/api/videos")
@@ -87,5 +91,34 @@ public class VideoController {
     @PostMapping("/api/admin/videos/external")
     public ApiResponse<VideoDetailResponse> createExternalVideo(@Valid @RequestBody ExternalVideoCreateRequest request) {
         return ApiResponse.success(videoService.createExternalVideo(request));
+    }
+
+    @GetMapping("/api/admin/videos/{videoId}/comments")
+    public ApiResponse<PageResult<VideoCommentItemResponse>> listAdminVideoComments(
+            @PathVariable("videoId") Long videoId,
+            @RequestParam(value = "page", defaultValue = "1") int page,
+            @RequestParam(value = "pageSize", defaultValue = "20") int pageSize) {
+        return ApiResponse.success(videoInteractionService.listCommentsForAdmin(videoId, page, pageSize));
+    }
+
+    @DeleteMapping("/api/admin/videos/{videoId}/comments/{commentId}")
+    public ApiResponse<String> deleteAdminVideoComment(
+            @PathVariable("videoId") Long videoId,
+            @PathVariable("commentId") Long commentId) {
+        return ApiResponse.success(videoInteractionService.deleteCommentAsAdmin(videoId, commentId));
+    }
+
+    @PostMapping("/api/admin/videos/{videoId}/comments/{commentId}/pin")
+    public ApiResponse<String> pinAdminVideoComment(
+            @PathVariable("videoId") Long videoId,
+            @PathVariable("commentId") Long commentId) {
+        return ApiResponse.success(videoInteractionService.pinCommentAsAdmin(videoId, commentId));
+    }
+
+    @PostMapping("/api/admin/videos/{videoId}/comments/{commentId}/unpin")
+    public ApiResponse<String> unpinAdminVideoComment(
+            @PathVariable("videoId") Long videoId,
+            @PathVariable("commentId") Long commentId) {
+        return ApiResponse.success(videoInteractionService.unpinCommentAsAdmin(videoId, commentId));
     }
 }

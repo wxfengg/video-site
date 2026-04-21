@@ -49,6 +49,26 @@ app:
     external-title-enabled: ${COVER_AUTO_EXTERNAL_TITLE_ENABLED:true}
   recommend:
     worker-cron: ${RECOMMEND_WORKER_CRON:0 5 * * * ?}
+    reason-enabled: true
   hot-rank:
     worker-cron: ${HOT_RANK_WORKER_CRON:15 0/5 * * * ?}
     top-n: ${HOT_RANK_TOP_N:50}
+  llm:
+    provider: ${LLM_PROVIDER:kimi}
+    api-key: ${KIMI_API_KEY:}
+    base-url: ${LLM_BASE_URL:https://api.kimi.com/coding}
+    model: ${LLM_MODEL:kimi-k2.6}
+    protocol: ${LLM_PROTOCOL:anthropic}
+    timeout-seconds: 60
+  intelligence:
+    enabled: ${INTELLIGENCE_ENABLED:true}
+    worker-cron: ${INTELLIGENCE_WORKER_CRON:0/30 * * * * ?}
+    audio:
+      provider: ${AUDIO_PROVIDER:whisper}
+      whisper-model: ${WHISPER_MODEL:small}
+      whisper-script: ${WHISPER_SCRIPT:../scripts/transcribe.py}
+      max-duration-sec: 600
+    frame:
+      enabled: true
+      count: 3
+      scale-width: 480

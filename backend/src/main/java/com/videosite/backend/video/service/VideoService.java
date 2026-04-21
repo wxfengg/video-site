@@ -1,6 +1,8 @@
 package com.videosite.backend.video.service;
 
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.videosite.backend.common.api.ErrorCode;
 import com.videosite.backend.common.exception.BusinessException;
 import com.videosite.backend.video.dto.ExternalVideoCreateRequest;
@@ -33,6 +35,7 @@ public class VideoService {
 
     private final JdbcTemplate jdbcTemplate;
     private final ExternalTitleCoverService externalTitleCoverService;
+    private final ObjectMapper objectMapper;
 
     @Value("${app.cover-auto.enabled:true}")
     private boolean autoCoverEnabled;
@@ -41,9 +44,11 @@ public class VideoService {
     private boolean autoExternalTitleCoverEnabled;
 
     public VideoService(JdbcTemplate jdbcTemplate,
-                        ExternalTitleCoverService externalTitleCoverService) {
+                        ExternalTitleCoverService externalTitleCoverService,
+                        ObjectMapper objectMapper) {
         this.jdbcTemplate = jdbcTemplate;
         this.externalTitleCoverService = externalTitleCoverService;
+        this.objectMapper = objectMapper;
     }
 
     public PageResult<VideoListItemResponse> listPublicVideos(int page, int pageSize, String keyword) {
@@ -57,7 +62,9 @@ public class VideoService {
     public VideoDetailResponse getVideoDetail(Long videoId, boolean admin) {
         try {
             VideoDetailResponse detail = jdbcTemplate.queryForObject(
-                    "SELECT id, title, description, cover_url, duration_sec, status, publish_at, created_at, updated_at FROM video WHERE id = ?",
+                    "SELECT v.id, v.title, v.description, v.cover_url, v.duration_sec, v.status, v.publish_at, v.created_at, v.updated_at, " +
+                            "vi.summary as ai_summary, vi.tags_json as ai_tags, vi.categories_json as ai_categories " +
+                            "FROM video v LEFT JOIN video_intelligence vi ON vi.video_id = v.id WHERE v.id = ?",
                     this::mapVideoDetail,
                     videoId
             );
@@ -227,6 +234,8 @@ public class VideoService {
         jdbcTemplate.update("DELETE FROM video_tfidf_profile WHERE video_id = ?", videoId);
         jdbcTemplate.update("DELETE FROM cover_analysis_task WHERE video_id = ?", videoId);
         jdbcTemplate.update("DELETE FROM video_tag WHERE video_id = ?", videoId);
+        jdbcTemplate.update("DELETE FROM video_intelligence WHERE video_id = ?", videoId);
+        jdbcTemplate.update("DELETE FROM video_intelligence_task WHERE video_id = ?", videoId);
 
         jdbcTemplate.update("DELETE FROM metric_video_5m WHERE video_id = ?", videoId);
         jdbcTemplate.update("DELETE FROM video_hot_rank_5m WHERE video_id = ?", videoId);
@@ -348,7 +357,21 @@ public class VideoService {
         detail.setPublishAt(rs.getTimestamp("publish_at") == null ? null : rs.getTimestamp("publish_at").toLocalDateTime());
         detail.setCreatedAt(rs.getTimestamp("created_at") == null ? null : rs.getTimestamp("created_at").toLocalDateTime());
         detail.setUpdatedAt(rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime());
+        detail.setAiSummary(rs.getString("ai_summary"));
+        detail.setAiTags(parseJsonStringList(rs.getString("ai_tags")));
+        detail.setAiCategories(parseJsonStringList(rs.getString("ai_categories")));
         return detail;
+    }
+
+    private List<String> parseJsonStringList(String json) {
+        if (!StringUtils.hasText(json)) {
+            return new ArrayList<>();
+        }
+        try {
+            return objectMapper.readValue(json, new TypeReference<List<String>>() {});
+        } catch (Exception ex) {
+            return new ArrayList<>();
+        }
     }
 
     private static class SourceItem {

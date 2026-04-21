@@ -1,6 +1,7 @@
 package com.videosite.backend.video.dto;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 public class VideoDetailResponse {
 
@@ -13,6 +14,9 @@ public class VideoDetailResponse {
     private LocalDateTime publishAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private String aiSummary;
+    private List<String> aiTags;
+    private List<String> aiCategories;
 
     public Long getId() {
         return id;
@@ -84,5 +88,29 @@ public class VideoDetailResponse {
 
     public void setUpdatedAt(LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public String getAiSummary() {
+        return aiSummary;
+    }
+
+    public void setAiSummary(String aiSummary) {
+        this.aiSummary = aiSummary;
+    }
+
+    public List<String> getAiTags() {
+        return aiTags;
+    }
+
+    public void setAiTags(List<String> aiTags) {
+        this.aiTags = aiTags;
+    }
+
+    public List<String> getAiCategories() {
+        return aiCategories;
+    }
+
+    public void setAiCategories(List<String> aiCategories) {
+        this.aiCategories = aiCategories;
     }
 }

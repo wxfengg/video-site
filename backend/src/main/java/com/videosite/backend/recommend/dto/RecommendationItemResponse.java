@@ -8,6 +8,10 @@ public class RecommendationItemResponse {
     private Double scoreContent;
     private Double scoreCf;
     private Double scoreHot;
+    private String title;
+    private String coverUrl;
+    private Integer durationSec;
+    private String recommendReason;
 
     public Long getVideoId() {
         return videoId;
@@ -55,5 +59,37 @@ public class RecommendationItemResponse {
 
     public void setScoreHot(Double scoreHot) {
         this.scoreHot = scoreHot;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public void setTitle(String title) {
+        this.title = title;
+    }
+
+    public String getCoverUrl() {
+        return coverUrl;
+    }
+
+    public void setCoverUrl(String coverUrl) {
+        this.coverUrl = coverUrl;
+    }
+
+    public Integer getDurationSec() {
+        return durationSec;
+    }
+
+    public void setDurationSec(Integer durationSec) {
+        this.durationSec = durationSec;
+    }
+
+    public String getRecommendReason() {
+        return recommendReason;
+    }
+
+    public void setRecommendReason(String recommendReason) {
+        this.recommendReason = recommendReason;
     }
 }

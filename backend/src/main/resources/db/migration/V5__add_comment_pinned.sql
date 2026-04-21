@@ -1,0 +1,1 @@
+ALTER TABLE video_comment ADD COLUMN is_pinned TINYINT NOT NULL DEFAULT 0 COMMENT '是否置顶:0/1' AFTER status;

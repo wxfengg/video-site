@@ -1,5 +1,7 @@
 package com.videosite.backend.transcode;
 
+import com.videosite.backend.intelligence.IntelligenceProperties;
+import com.videosite.backend.intelligence.VideoIntelligenceService;
 import com.videosite.backend.storage.StorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,6 +34,8 @@ public class TranscodeService {
     private final JdbcTemplate jdbcTemplate;
     private final StorageService storageService;
     private final FfmpegCommandBuilder ffmpegCommandBuilder;
+    private final VideoIntelligenceService videoIntelligenceService;
+    private final IntelligenceProperties intelligenceProperties;
 
     @Value("${app.transcode.ffmpeg-bin:ffmpeg}")
     private String ffmpegBin;
@@ -50,10 +54,14 @@ public class TranscodeService {
 
     public TranscodeService(JdbcTemplate jdbcTemplate,
                             StorageService storageService,
-                            FfmpegCommandBuilder ffmpegCommandBuilder) {
+                            FfmpegCommandBuilder ffmpegCommandBuilder,
+                            VideoIntelligenceService videoIntelligenceService,
+                            IntelligenceProperties intelligenceProperties) {
         this.jdbcTemplate = jdbcTemplate;
         this.storageService = storageService;
         this.ffmpegCommandBuilder = ffmpegCommandBuilder;
+        this.videoIntelligenceService = videoIntelligenceService;
+        this.intelligenceProperties = intelligenceProperties;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -76,6 +84,13 @@ public class TranscodeService {
         try {
             executeTask(task);
             markTaskSuccess(task);
+            try {
+                if (intelligenceProperties.isEnabled()) {
+                    videoIntelligenceService.submitTask(task.getVideoId());
+                }
+            } catch (Exception intelEx) {
+                log.warn("转码成功后提交智能分析任务失败: videoId={}, error={}", task.getVideoId(), intelEx.getMessage());
+            }
         } catch (Exception ex) {
             markTaskFailure(task, ex);
         }

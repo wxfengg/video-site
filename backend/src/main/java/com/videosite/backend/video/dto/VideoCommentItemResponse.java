@@ -9,6 +9,7 @@ public class VideoCommentItemResponse {
     private String username;
     private String content;
     private LocalDateTime createdAt;
+    private Boolean pinned;
 
     public Long getId() {
         return id;
@@ -48,5 +49,13 @@ public class VideoCommentItemResponse {
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public Boolean getPinned() {
+        return pinned;
+    }
+
+    public void setPinned(Boolean pinned) {
+        this.pinned = pinned;
     }
 }

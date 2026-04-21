@@ -4,7 +4,7 @@
       <div class="hero-main">
         <span class="hero-kicker">智能推荐</span>
         <h1>发现你喜欢的视频</h1>
-        <p class="hero-desc">基于当前能力优先展示已发布内容，后续将接入混合推荐与个性化排序。</p>
+        <p class="hero-desc">基于 AI 多模态内容理解与混合推荐算法，为你发现感兴趣的视频。</p>
         <div class="hero-meta">
           <span class="chip">实时更新</span>
           <p class="visitor">
@@ -58,8 +58,19 @@
       <template #header>
         <div class="header-row">
           <div>
-            <h2 class="section-title">视频列表</h2>
-            <p class="section-subtitle">按关键词筛选已发布内容</p>
+            <h2 class="section-title">
+              <span v-if="!keyword.trim() && page === 1" class="section-ai"
+                >AI</span
+              >
+              {{ !keyword.trim() && page === 1 ? "为你推荐" : "视频列表" }}
+            </h2>
+            <p class="section-subtitle">
+              {{
+                !keyword.trim() && page === 1
+                  ? "基于内容相似度、协同过滤与热度的混合智能推荐"
+                  : "按关键词筛选已发布内容"
+              }}
+            </p>
           </div>
           <el-input
             v-model="keyword"
@@ -151,7 +162,11 @@ async function reload() {
       if (recs.length > 0) {
         const byId = new Map<string, VideoListItem>(allRecords.map((item) => [String(item.id), item]))
         const recommendedRecords = recs
-          .map((rec) => byId.get(String(rec.videoId)))
+          .map((rec) => {
+            const existing = byId.get(String(rec.videoId))
+            if (!existing) return null
+            return { ...existing, recommendReason: rec.recommendReason }
+          })
           .filter((item): item is VideoListItem => Boolean(item))
 
         const selectedIds = new Set(recommendedRecords.map((item) => String(item.id)))
@@ -391,6 +406,22 @@ function applyCoverVariants(videoList: VideoListItem[], assignmentMap: Map<strin
 .section-title {
   margin: 0;
   font-size: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-ai {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #4f78ff, #7456f6);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .section-subtitle {
