@@ -172,7 +172,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue"
 import { useRoute } from "vue-router"
 import { ElMessage } from "element-plus"
-import { Loading } from "@element-plus/icons-vue"
+
 import {
   addVideoLike,
   createVideoComment,

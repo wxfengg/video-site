@@ -91,7 +91,7 @@
             <VideoCard v-for="video in videos" :key="video.id" :video="video" @open="openDetail" />
           </div>
 
-          <div class="pager-wrap">
+          <!-- <div class="pager-wrap">
             <el-pagination
               layout="total, prev, pager, next"
               :total="total"
@@ -99,7 +99,7 @@
               :current-page="page"
               @current-change="onPageChange"
             />
-          </div>
+          </div> -->
         </template>
       </el-skeleton>
     </el-card>
@@ -127,7 +127,7 @@ const router = useRouter()
 const loading = ref(false)
 const videos = ref<VideoListItem[]>([])
 const page = ref(1)
-const pageSize = 12
+const pageSize = 1200
 const total = ref(0)
 const keyword = ref("")
 const visitorId = ref(getOrCreateVisitorId())
