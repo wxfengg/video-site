@@ -93,11 +93,11 @@ public class VideoInteractionService {
         );
 
         List<VideoCommentItemResponse> records = jdbcTemplate.query(
-                "SELECT c.id, c.user_id, u.username, c.content, c.created_at " +
+                "SELECT c.id, c.user_id, u.username, c.content, c.created_at, c.is_pinned " +
                         "FROM video_comment c " +
                         "JOIN app_user u ON u.id = c.user_id " +
                         "WHERE c.video_id = ? AND c.status = 'normal' " +
-                        "ORDER BY c.created_at DESC LIMIT ? OFFSET ?",
+                        "ORDER BY c.is_pinned DESC, c.created_at DESC LIMIT ? OFFSET ?",
                 (rs, rowNum) -> {
                     VideoCommentItemResponse item = new VideoCommentItemResponse();
                     item.setId(rs.getLong("id"));
@@ -105,6 +105,7 @@ public class VideoInteractionService {
                     item.setUsername(rs.getString("username"));
                     item.setContent(rs.getString("content"));
                     item.setCreatedAt(rs.getTimestamp("created_at") == null ? null : rs.getTimestamp("created_at").toLocalDateTime());
+                    item.setPinned(rs.getInt("is_pinned") > 0);
                     return item;
                 },
                 videoId,
@@ -134,7 +135,7 @@ public class VideoInteractionService {
         );
 
         List<VideoCommentItemResponse> rows = jdbcTemplate.query(
-                "SELECT c.id, c.user_id, u.username, c.content, c.created_at " +
+                "SELECT c.id, c.user_id, u.username, c.content, c.created_at, c.is_pinned " +
                         "FROM video_comment c JOIN app_user u ON u.id = c.user_id WHERE c.id = ? LIMIT 1",
                 (rs, rowNum) -> {
                     VideoCommentItemResponse item = new VideoCommentItemResponse();
@@ -143,6 +144,7 @@ public class VideoInteractionService {
                     item.setUsername(rs.getString("username"));
                     item.setContent(rs.getString("content"));
                     item.setCreatedAt(rs.getTimestamp("created_at") == null ? null : rs.getTimestamp("created_at").toLocalDateTime());
+                    item.setPinned(rs.getInt("is_pinned") > 0);
                     return item;
                 },
                 commentId
@@ -192,6 +194,139 @@ public class VideoInteractionService {
         return "ok";
     }
 
+    public PageResult<VideoCommentItemResponse> listCommentsForAdmin(Long videoId, int page, int pageSize) {
+        ensureVideoExists(videoId);
+
+        int safePage = Math.max(page, 1);
+        int safePageSize = Math.max(1, Math.min(pageSize, MAX_PAGE_SIZE));
+        int offset = (safePage - 1) * safePageSize;
+
+        Long total = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM video_comment WHERE video_id = ? AND status = 'normal'",
+                Long.class,
+                videoId
+        );
+
+        List<VideoCommentItemResponse> records = jdbcTemplate.query(
+                "SELECT c.id, c.user_id, u.username, c.content, c.created_at, c.is_pinned " +
+                        "FROM video_comment c " +
+                        "JOIN app_user u ON u.id = c.user_id " +
+                        "WHERE c.video_id = ? AND c.status = 'normal' " +
+                        "ORDER BY c.is_pinned DESC, c.created_at DESC LIMIT ? OFFSET ?",
+                (rs, rowNum) -> {
+                    VideoCommentItemResponse item = new VideoCommentItemResponse();
+                    item.setId(rs.getLong("id"));
+                    item.setUserId(rs.getLong("user_id"));
+                    item.setUsername(rs.getString("username"));
+                    item.setContent(rs.getString("content"));
+                    item.setCreatedAt(rs.getTimestamp("created_at") == null ? null : rs.getTimestamp("created_at").toLocalDateTime());
+                    item.setPinned(rs.getInt("is_pinned") > 0);
+                    return item;
+                },
+                videoId,
+                safePageSize,
+                offset
+        );
+
+        return new PageResult<>(total == null ? 0 : total, safePage, safePageSize, records);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public String deleteCommentAsAdmin(Long videoId, Long commentId) {
+        List<CommentOwnerRow> rows = jdbcTemplate.query(
+                "SELECT id, user_id FROM video_comment WHERE id = ? AND video_id = ? AND status = 'normal' LIMIT 1",
+                (rs, rowNum) -> new CommentOwnerRow(rs.getLong("id"), rs.getLong("user_id")),
+                commentId,
+                videoId
+        );
+
+        if (rows.isEmpty()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "评论不存在");
+        }
+
+        jdbcTemplate.update("DELETE FROM video_comment WHERE id = ?", rows.get(0).commentId);
+        return "ok";
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public String pinCommentAsAdmin(Long videoId, Long commentId) {
+        List<CommentOwnerRow> rows = jdbcTemplate.query(
+                "SELECT id, user_id FROM video_comment WHERE id = ? AND video_id = ? AND status = 'normal' LIMIT 1",
+                (rs, rowNum) -> new CommentOwnerRow(rs.getLong("id"), rs.getLong("user_id")),
+                commentId,
+                videoId
+        );
+
+        if (rows.isEmpty()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "评论不存在");
+        }
+
+        jdbcTemplate.update("UPDATE video_comment SET is_pinned = 1 WHERE id = ?", rows.get(0).commentId);
+        return "ok";
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public String unpinCommentAsAdmin(Long videoId, Long commentId) {
+        List<CommentOwnerRow> rows = jdbcTemplate.query(
+                "SELECT id, user_id FROM video_comment WHERE id = ? AND video_id = ? AND status = 'normal' LIMIT 1",
+                (rs, rowNum) -> new CommentOwnerRow(rs.getLong("id"), rs.getLong("user_id")),
+                commentId,
+                videoId
+        );
+
+        if (rows.isEmpty()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "评论不存在");
+        }
+
+        jdbcTemplate.update("UPDATE video_comment SET is_pinned = 0 WHERE id = ?", rows.get(0).commentId);
+        return "ok";
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public String pinComment(Long userId, Long videoId, Long commentId) {
+        List<CommentOwnerRow> rows = jdbcTemplate.query(
+                "SELECT id, user_id FROM video_comment WHERE id = ? AND video_id = ? AND status = 'normal' LIMIT 1",
+                (rs, rowNum) -> new CommentOwnerRow(rs.getLong("id"), rs.getLong("user_id")),
+                commentId,
+                videoId
+        );
+
+        if (rows.isEmpty()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "评论不存在");
+        }
+
+        CommentOwnerRow row = rows.get(0);
+        if (!row.userId.equals(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "仅支持置顶自己的评论");
+        }
+
+        jdbcTemplate.update("UPDATE video_comment SET is_pinned = 0 WHERE video_id = ?", videoId);
+        jdbcTemplate.update("UPDATE video_comment SET is_pinned = 1 WHERE id = ?", row.commentId);
+        return "ok";
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public String unpinComment(Long userId, Long videoId, Long commentId) {
+        List<CommentOwnerRow> rows = jdbcTemplate.query(
+                "SELECT id, user_id FROM video_comment WHERE id = ? AND video_id = ? AND status = 'normal' LIMIT 1",
+                (rs, rowNum) -> new CommentOwnerRow(rs.getLong("id"), rs.getLong("user_id")),
+                commentId,
+                videoId
+        );
+
+        if (rows.isEmpty()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "评论不存在");
+        }
+
+        CommentOwnerRow row = rows.get(0);
+        if (!row.userId.equals(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "仅支持取消置顶自己的评论");
+        }
+
+        jdbcTemplate.update("UPDATE video_comment SET is_pinned = 0 WHERE id = ?", row.commentId);
+        return "ok";
+    }
+
     private void ensureVideoInteractable(Long videoId) {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(1) FROM video WHERE id = ? AND status IN ('ready', 'published')",
@@ -200,6 +335,17 @@ public class VideoInteractionService {
         );
         if (count == null || count <= 0) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "视频不存在或不可见");
+        }
+    }
+
+    private void ensureVideoExists(Long videoId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM video WHERE id = ?",
+                Integer.class,
+                videoId
+        );
+        if (count == null || count <= 0) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "视频不存在");
         }
     }
 

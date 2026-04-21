@@ -1,6 +1,8 @@
 package com.videosite.backend.recommend.service;
 
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.videosite.backend.common.auth.AuthConstants;
 import com.videosite.backend.recommend.dto.RecommendFeedbackRequest;
 import com.videosite.backend.recommend.dto.RecommendationItemResponse;
@@ -16,6 +18,7 @@ import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -34,9 +37,15 @@ public class RecommendService {
     private static final String HOT_RANK_WINDOW_FOR_FALLBACK = "24h";
 
     private final JdbcTemplate jdbcTemplate;
+    private final RecommendReasonGenerator recommendReasonGenerator;
+    private final ObjectMapper objectMapper;
 
-    public RecommendService(JdbcTemplate jdbcTemplate) {
+    public RecommendService(JdbcTemplate jdbcTemplate,
+                            RecommendReasonGenerator recommendReasonGenerator,
+                            ObjectMapper objectMapper) {
         this.jdbcTemplate = jdbcTemplate;
+        this.recommendReasonGenerator = recommendReasonGenerator;
+        this.objectMapper = objectMapper;
     }
 
     public List<RecommendationItemResponse> listHomeRecommendations(String visitorId, int limit) {
@@ -49,7 +58,8 @@ public class RecommendService {
             }
 
             List<RecommendationItemResponse> rows = jdbcTemplate.query(
-                "SELECT rr.video_id, rr.rank_index, rr.score_total, rr.score_content, rr.score_cf, rr.score_hot " +
+                "SELECT rr.video_id, rr.rank_index, rr.score_total, rr.score_content, rr.score_cf, rr.score_hot, " +
+                    "v.title, v.cover_url, v.duration_sec, rr.recommend_reason " +
                     "FROM recommendation_result rr " +
                     "JOIN video v ON v.id = rr.video_id " +
                     "WHERE rr.visitor_id = ? AND rr.scene = 'home' AND rr.version_hour = ? AND v.status = 'published' " +
@@ -62,6 +72,10 @@ public class RecommendService {
                         item.setScoreContent(rs.getObject("score_content") == null ? null : rs.getDouble("score_content"));
                         item.setScoreCf(rs.getObject("score_cf") == null ? null : rs.getDouble("score_cf"));
                         item.setScoreHot(rs.getObject("score_hot") == null ? null : rs.getDouble("score_hot"));
+                        item.setTitle(rs.getString("title"));
+                        item.setCoverUrl(rs.getString("cover_url"));
+                        item.setDurationSec((Integer) rs.getObject("duration_sec"));
+                        item.setRecommendReason(rs.getString("recommend_reason"));
                         return item;
                     },
                     visitorId,
@@ -150,6 +164,8 @@ public class RecommendService {
                 visitorId
         );
 
+        Map<Long, List<String>> categoryMap = loadCategories(candidates);
+
         List<ScoredVideo> scored = new ArrayList<>();
         for (Long videoId : candidates) {
             double content = contentScore(videoId, recentVideos, versionHour);
@@ -169,9 +185,12 @@ public class RecommendService {
             if (rank > 30) {
                 break;
             }
+            String reason = recommendReasonGenerator.generate(
+                    item.contentScore, item.hotScore, categoryMap.get(item.videoId)
+            );
             jdbcTemplate.update(
-                    "INSERT INTO recommendation_result (id, visitor_id, video_id, scene, rank_index, score_total, score_content, score_cf, score_hot, version_hour, created_at) " +
-                            "VALUES (?, ?, ?, 'home', ?, ?, ?, ?, ?, ?, NOW())",
+                    "INSERT INTO recommendation_result (id, visitor_id, video_id, scene, rank_index, score_total, score_content, score_cf, score_hot, recommend_reason, version_hour, created_at) " +
+                            "VALUES (?, ?, ?, 'home', ?, ?, ?, ?, ?, ?, ?, NOW())",
                     IdWorker.getId(),
                     visitorId,
                     item.videoId,
@@ -180,6 +199,7 @@ public class RecommendService {
                     item.contentScore,
                     item.cfScore,
                     item.hotScore,
+                    reason,
                     versionHour
             );
             rank += 1;
@@ -405,11 +425,17 @@ public class RecommendService {
 
     private List<VideoDoc> loadPublishedVideos() {
         return jdbcTemplate.query(
-                "SELECT id, title, description FROM video WHERE status IN ('ready', 'published') ORDER BY updated_at DESC LIMIT 500",
-                (rs, rowNum) -> new VideoDoc(
-                        rs.getLong("id"),
-                        safe(rs.getString("title")) + " " + safe(rs.getString("description"))
-                )
+                "SELECT v.id, v.title, v.description, vi.embedding_text FROM video v LEFT JOIN video_intelligence vi ON vi.video_id = v.id WHERE v.status IN ('ready', 'published') ORDER BY v.updated_at DESC LIMIT 500",
+                (rs, rowNum) -> {
+                    String embeddingText = rs.getString("embedding_text");
+                    String text;
+                    if (StringUtils.hasText(embeddingText)) {
+                        text = embeddingText;
+                    } else {
+                        text = safe(rs.getString("title")) + " " + safe(rs.getString("description"));
+                    }
+                    return new VideoDoc(rs.getLong("id"), text);
+                }
         );
     }
 
@@ -575,6 +601,33 @@ public class RecommendService {
 
     private String safe(String text) {
         return StringUtils.hasText(text) ? text : "";
+    }
+
+    private Map<Long, List<String>> loadCategories(List<Long> videoIds) {
+        if (videoIds == null || videoIds.isEmpty()) {
+            return new HashMap<>();
+        }
+        String placeholders = String.join(",", Collections.nCopies(videoIds.size(), "?"));
+        String sql = "SELECT video_id, categories_json FROM video_intelligence WHERE video_id IN (" + placeholders + ")";
+
+        Map<Long, List<String>> result = new HashMap<>();
+        jdbcTemplate.query(sql, rs -> {
+            Long vid = rs.getLong("video_id");
+            String json = rs.getString("categories_json");
+            result.put(vid, parseStringList(json));
+        }, videoIds.toArray());
+        return result;
+    }
+
+    private List<String> parseStringList(String json) {
+        if (!StringUtils.hasText(json)) {
+            return new ArrayList<>();
+        }
+        try {
+            return objectMapper.readValue(json, new TypeReference<List<String>>() {});
+        } catch (Exception ex) {
+            return new ArrayList<>();
+        }
     }
 
     private static class VideoDoc {

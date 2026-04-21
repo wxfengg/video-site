@@ -15,6 +15,7 @@ export interface VideoListItem {
   durationSec: number | null
   publishAt: string | null
   createdAt: string
+  recommendReason?: string | null
 }
 
 export interface VideoDetail {
@@ -27,6 +28,9 @@ export interface VideoDetail {
   publishAt: string | null
   createdAt: string
   updatedAt: string
+  aiSummary: string | null
+  aiTags: string[] | null
+  aiCategories: string[] | null
 }
 
 export interface VideoPlaySources {
@@ -85,6 +89,10 @@ export interface RecommendationItem {
   scoreContent: number
   scoreCf: number
   scoreHot: number
+  title: string
+  coverUrl: string | null
+  durationSec: number | null
+  recommendReason: string | null
 }
 
 export interface VideoHotRankItem {
@@ -111,6 +119,7 @@ export interface VideoCommentItem {
   username: string
   content: string
   createdAt: string
+  pinned?: boolean
 }
 
 export interface ExternalVideoCreateRequest {
@@ -366,6 +375,49 @@ export async function createVideoComment(videoId: number | string, content: stri
 export async function deleteVideoComment(videoId: number | string, commentId: number | string) {
   const response = await httpRequest<string>(`/api/videos/${videoId}/comments/${commentId}`, {
     method: "DELETE",
+  })
+  return response.data
+}
+
+export async function pinVideoComment(videoId: number | string, commentId: number | string) {
+  const response = await httpRequest<string>(`/api/videos/${videoId}/comments/${commentId}/pin`, {
+    method: "POST",
+  })
+  return response.data
+}
+
+export async function unpinVideoComment(videoId: number | string, commentId: number | string) {
+  const response = await httpRequest<string>(`/api/videos/${videoId}/comments/${commentId}/unpin`, {
+    method: "POST",
+  })
+  return response.data
+}
+
+export async function getAdminVideoComments(videoId: number | string, page = 1, pageSize = 10) {
+  const response = await httpRequest<PageResult<VideoCommentItem>>(
+    `/api/admin/videos/${videoId}/comments${queryString({ page, pageSize })}`,
+    { method: "GET" },
+  )
+  return response.data
+}
+
+export async function deleteAdminVideoComment(videoId: number | string, commentId: number | string) {
+  const response = await httpRequest<string>(`/api/admin/videos/${videoId}/comments/${commentId}`, {
+    method: "DELETE",
+  })
+  return response.data
+}
+
+export async function pinAdminVideoComment(videoId: number | string, commentId: number | string) {
+  const response = await httpRequest<string>(`/api/admin/videos/${videoId}/comments/${commentId}/pin`, {
+    method: "POST",
+  })
+  return response.data
+}
+
+export async function unpinAdminVideoComment(videoId: number | string, commentId: number | string) {
+  const response = await httpRequest<string>(`/api/admin/videos/${videoId}/comments/${commentId}/unpin`, {
+    method: "POST",
   })
   return response.data
 }

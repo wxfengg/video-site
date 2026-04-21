@@ -77,6 +77,22 @@ public class VideoInteractionController {
         return ApiResponse.success(videoInteractionService.deleteComment(userId, videoId, commentId, currentVisitorId(request)));
     }
 
+    @PostMapping("/{videoId}/comments/{commentId}/pin")
+    public ApiResponse<String> pinComment(@PathVariable("videoId") Long videoId,
+                                          @PathVariable("commentId") Long commentId,
+                                          HttpServletRequest request) {
+        Long userId = currentUserId(request, true);
+        return ApiResponse.success(videoInteractionService.pinComment(userId, videoId, commentId));
+    }
+
+    @PostMapping("/{videoId}/comments/{commentId}/unpin")
+    public ApiResponse<String> unpinComment(@PathVariable("videoId") Long videoId,
+                                            @PathVariable("commentId") Long commentId,
+                                            HttpServletRequest request) {
+        Long userId = currentUserId(request, true);
+        return ApiResponse.success(videoInteractionService.unpinComment(userId, videoId, commentId));
+    }
+
     private String currentVisitorId(HttpServletRequest request) {
         Object visitorAttr = request.getAttribute(AuthConstants.VISITOR_ID_ATTR);
         return visitorAttr == null ? "anonymous" : String.valueOf(visitorAttr);
